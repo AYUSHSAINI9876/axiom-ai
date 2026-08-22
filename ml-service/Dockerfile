@@ -11,11 +11,17 @@ WORKDIR /app
 
 # build-essential is needed only while resolving/compiling wheels; it is purged
 # in the same layer so it never reaches the final image.
+#
+# libgomp1 is reinstalled *after* the purge on purpose: torch links against
+# libgomp.so.1, but that library arrives as a dependency of gcc, so
+# `--auto-remove` drops it along with build-essential and `import torch` then
+# fails at runtime. Installing it afterwards marks it manually-required.
 COPY requirements.txt .
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential \
     && pip install --no-cache-dir -r requirements.txt \
     && apt-get purge -y --auto-remove build-essential \
+    && apt-get install -y --no-install-recommends libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY . .
