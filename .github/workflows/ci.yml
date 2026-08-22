@@ -132,6 +132,8 @@ jobs:
   ml-service-image:
     name: ML Service image
     runs-on: ubuntu-latest
+    # Without this a wedged build would sit on the 6-hour default.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -145,6 +147,9 @@ jobs:
 
       - uses: docker/setup-buildx-action@v4
 
+      # No gha cache here on purpose: even the CPU-only image is well over a
+      # gigabyte, and round-tripping that through the 10GB Actions cache costs
+      # more than the rebuild it saves.
       - name: Build ml-service image
         uses: docker/build-push-action@v7
         with:
@@ -152,8 +157,6 @@ jobs:
           push: false
           load: true
           tags: axiom-ml-service:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
       # Guards a real failure mode: purging build-essential with --auto-remove
       # also removes libgomp1 (a gcc dependency) that torch links against, so

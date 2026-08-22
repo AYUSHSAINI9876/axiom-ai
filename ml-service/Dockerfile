@@ -19,6 +19,14 @@ WORKDIR /app
 COPY requirements.txt .
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential \
+    # sentence-transformers depends on torch, and the default PyPI torch wheel
+    # bundles ~2.5GB of CUDA libraries that are dead weight in a CPU-only
+    # container. Installing the CPU build first satisfies that dependency, so
+    # the requirements install below leaves it alone. The +cpu local version
+    # exists only on PyTorch's index, which is why this is --extra-index-url.
+    && pip install --no-cache-dir \
+         --extra-index-url https://download.pytorch.org/whl/cpu \
+         torch==2.13.0+cpu \
     && pip install --no-cache-dir -r requirements.txt \
     && apt-get purge -y --auto-remove build-essential \
     && apt-get install -y --no-install-recommends libgomp1 \
