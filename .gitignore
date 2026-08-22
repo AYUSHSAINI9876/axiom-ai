@@ -1,0 +1,56 @@
+# ---- Secrets ----
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ---- Python / ml-service ----
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# ml-service runtime state (docstore/index metadata; rebuilt from documents)
+ml-service/storage/
+
+# ---- Node / frontend ----
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+.vercel
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ---- Go / gateway ----
+gateway/main
+gateway/main.exe
+gateway/gateway
+*.test
+*.out
+
+# ---- Uploaded corpus ----
+# Documents uploaded at runtime are user data, not source. The sample doc in
+# data/docs is force-added below so the repo stays runnable out of the box.
+data/docs/*
+!data/docs/.gitkeep
+!data/docs/chemical_kinetics.md
+
+# ---- Editors / OS ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

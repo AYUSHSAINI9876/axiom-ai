@@ -1,0 +1,22 @@
+# Normalize to LF in the repository so files copied into Linux containers
+# never arrive with CRLF endings, regardless of the contributor's platform.
+* text=auto eol=lf
+
+# Windows-native scripts keep CRLF in the working tree.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Lockfiles: keep LF, and hide the churn from diffs/language stats.
+package-lock.json text eol=lf linguist-generated=true
+go.sum text eol=lf linguist-generated=true
+
+# Binary assets — never touch these.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary

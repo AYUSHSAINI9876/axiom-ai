@@ -1,0 +1,25 @@
+# Pinned for reproducible builds. LlamaIndex ships breaking changes on minor
+# releases, so the core package is pinned alongside every integration package
+# that imports from it.
+
+# Web framework
+fastapi==0.139.2
+uvicorn==0.51.0
+python-multipart==0.0.32
+python-dotenv==1.2.2
+
+# LlamaIndex core + integrations
+llama-index==0.14.16
+llama-index-core==0.14.23
+llama-index-embeddings-huggingface==0.7.0
+llama-index-vector-stores-qdrant==0.10.2
+llama-index-llms-ollama==0.10.1
+llama-index-llms-groq==0.5.0
+llama-index-readers-file==0.5.6
+llama-index-retrievers-bm25==0.7.1
+
+# Retrieval / embeddings / storage
+qdrant-client==1.18.0
+sentence-transformers==5.6.1
+rank-bm25==0.2.2
+pypdf==6.14.2

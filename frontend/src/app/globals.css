@@ -1,0 +1,143 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0a0a0b;
+  --foreground: #e4e4e7;
+  --accent: #06b6d4;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: "Inter", sans-serif;
+}
+
+@keyframes gradient {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.bg-animate {
+  background: linear-gradient(-45deg, #0a0a0b, #111827, #1e1b4b, #0a0a0b);
+  background-size: 400% 400%;
+  animation: gradient 15s ease infinite;
+}
+
+.glow {
+  box-shadow: 0 0 20px rgba(6, 182, 212, 0.2);
+}
+
+.scrollbar-hide {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  width: 6px;
+}
+.scrollbar-hide::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.15);
+  border-radius: 999px;
+}
+
+/* Minimal hand-written markdown styling for assistant responses, so we don't
+   need to pull in the Tailwind typography plugin for a handful of elements. */
+.axiom-prose {
+  line-height: 1.65;
+}
+.axiom-prose > :first-child {
+  margin-top: 0;
+}
+.axiom-prose > :last-child {
+  margin-bottom: 0;
+}
+.axiom-prose p {
+  margin: 0.5em 0;
+}
+.axiom-prose h1,
+.axiom-prose h2,
+.axiom-prose h3 {
+  font-weight: 600;
+  color: #f4f4f5;
+  margin: 1em 0 0.4em;
+}
+.axiom-prose h1 {
+  font-size: 1.15em;
+}
+.axiom-prose h2 {
+  font-size: 1.08em;
+}
+.axiom-prose h3 {
+  font-size: 1.02em;
+}
+.axiom-prose ul,
+.axiom-prose ol {
+  margin: 0.5em 0;
+  padding-left: 1.4em;
+}
+.axiom-prose ul {
+  list-style: disc;
+}
+.axiom-prose ol {
+  list-style: decimal;
+}
+.axiom-prose li {
+  margin: 0.2em 0;
+}
+.axiom-prose strong {
+  color: #f4f4f5;
+  font-weight: 600;
+}
+.axiom-prose a {
+  color: #22d3ee;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.axiom-prose code {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  padding: 0.15em 0.4em;
+  font-size: 0.85em;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+}
+.axiom-prose pre {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 0.75em 1em;
+  overflow-x: auto;
+  margin: 0.6em 0;
+}
+.axiom-prose pre code {
+  background: none;
+  padding: 0;
+}
+.axiom-prose blockquote {
+  border-left: 2px solid rgba(6, 182, 212, 0.5);
+  padding-left: 0.8em;
+  color: #a1a1aa;
+  margin: 0.5em 0;
+}
+.axiom-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  font-size: 0.9em;
+}
+.axiom-prose th,
+.axiom-prose td {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.4em 0.6em;
+  text-align: left;
+}

@@ -1,0 +1,7 @@
+main
+*.exe
+.git
+.gitignore
+*.md
+Dockerfile
+.dockerignore
