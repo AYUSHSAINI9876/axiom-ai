@@ -27,7 +27,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache-dependency-path: gateway/go.sum
 
       - name: Verify go.mod/go.sum are tidy
@@ -172,6 +172,41 @@ jobs:
           echo "container user: $user"
           [ "$user" = "axiom" ]
 
+  ml-service-lite-image:
+    name: ML Service image (deploy variant)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      # The variant Render deploys. It is built separately from the default
+      # image because the whole point is that it shares none of the torch
+      # layers — a break here would only surface in production otherwise.
+      - name: Build the lite ml-service image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./ml-service
+          file: ./ml-service/Dockerfile.lite
+          push: false
+          load: true
+          tags: axiom-ml-service:lite
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Asserts the property that makes this image deployable: it imports and
+      # serves without torch present. If a dependency quietly pulled torch back
+      # in, the image would still work but no longer fit its memory budget.
+      - name: Verify the lite image runs without torch
+        run: |
+          docker run --rm -e AXIOM_SKIP_MODEL_INIT=1 axiom-ml-service:lite python -c "
+          import importlib.util, main
+          assert importlib.util.find_spec('torch') is None, 'torch leaked into the lite image'
+          import fastembed
+          print('lite image ok — fastembed present, torch absent')
+          "
+
   compose:
     name: Compose config
     runs-on: ubuntu-latest
@@ -180,3 +215,91 @@ jobs:
 
       - name: Validate docker-compose.yml
         run: docker compose config --quiet
+
+      - name: Validate render.yaml
+        run: |
+          python -c "
+          import sys, yaml
+          spec = yaml.safe_load(open('render.yaml'))
+          services = {s['name']: s for s in spec['services']}
+          assert 'axiom-gateway' in services and 'axiom-ml-service' in services
+          # The blueprint deploys the lite image on purpose; the default one
+          # does not fit the plan, and swapping it back would fail at runtime
+          # rather than at deploy time.
+          assert services['axiom-ml-service']['dockerfilePath'].endswith('Dockerfile.lite')
+          gateway_keys = {e['key'] for e in services['axiom-gateway']['envVars']}
+          assert {'DATABASE_URL', 'JWT_SECRET', 'ML_SERVICE_URL', 'GATEWAY_SHARED_SECRET'} <= gateway_keys
+          print('render.yaml ok')
+          "
+
+  auth-smoke:
+    name: Auth end-to-end (gateway + postgres)
+    runs-on: ubuntu-latest
+    # The unit suites run the gateway against its in-memory store. This is the
+    # only job that exercises the Postgres implementation, where the refresh
+    # rotation is a different query (an atomic UPDATE ... RETURNING) than the
+    # in-memory one.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: axiom
+          POSTGRES_PASSWORD: axiom-ci
+          POSTGRES_DB: axiom
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U axiom -d axiom"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+          cache-dependency-path: gateway/go.sum
+
+      - name: Start the gateway against Postgres
+        working-directory: gateway
+        env:
+          DATABASE_URL: postgres://axiom:axiom-ci@localhost:5432/axiom?sslmode=disable
+          JWT_SECRET: ci-secret-long-enough-for-the-length-check
+          ML_SERVICE_URL: http://127.0.0.1:9  # unreachable on purpose; auth never touches it
+          PORT: "8080"
+        run: |
+          go build -o /tmp/gateway .
+          /tmp/gateway &
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:8080/health >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -fsS http://localhost:8080/health
+
+      - name: Register, sign in, refresh, and reject a replay
+        run: |
+          set -euo pipefail
+
+          register=$(curl -fsS -X POST http://localhost:8080/auth/register             -H 'Content-Type: application/json'             -d '{"email":"ci@example.com","name":"CI Runner","password":"ci-password-1234"}')
+          access=$(echo "$register" | python -c "import json,sys; print(json.load(sys.stdin)['access_token'])")
+          refresh=$(echo "$register" | python -c "import json,sys; print(json.load(sys.stdin)['refresh_token'])")
+
+          echo "--- the access token reaches a protected route ---"
+          me=$(curl -fsS http://localhost:8080/auth/me -H "Authorization: Bearer $access")
+          echo "$me" | grep -q 'ci@example.com'
+
+          echo "--- an unauthenticated call is refused ---"
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/documents)
+          [ "$code" = "401" ] || { echo "expected 401, got $code"; exit 1; }
+
+          echo "--- refresh rotates the token ---"
+          rotated=$(curl -fsS -X POST http://localhost:8080/auth/refresh             -H 'Content-Type: application/json' -d "{\"refresh_token\":\"$refresh\"}")
+          new_refresh=$(echo "$rotated" | python -c "import json,sys; print(json.load(sys.stdin)['refresh_token'])")
+          [ "$new_refresh" != "$refresh" ] || { echo "refresh token was not rotated"; exit 1; }
+
+          echo "--- replaying the consumed token is refused ---"
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8080/auth/refresh             -H 'Content-Type: application/json' -d "{\"refresh_token\":\"$refresh\"}")
+          [ "$code" = "401" ] || { echo "expected 401 on replay, got $code"; exit 1; }
+
+          echo "all auth flows behaved correctly against Postgres"

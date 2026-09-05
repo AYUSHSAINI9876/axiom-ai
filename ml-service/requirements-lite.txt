@@ -1,0 +1,31 @@
+# Deployment variant of requirements.txt.
+#
+# The difference that matters is torch: the full stack runs
+# BAAI/bge-large-en-v1.5 through sentence-transformers, which needs a ~200MB
+# torch runtime and 1.3GB of weights, and comfortably exceeds the memory of a
+# small managed instance. This file swaps that for fastembed — the same BGE
+# family as quantized ONNX, run through onnxruntime — which keeps resident
+# memory low enough to deploy on a 512MB plan.
+#
+# Selected with EMBED_BACKEND=fastembed. See ml-service/main.py.
+
+# Web framework
+fastapi==0.139.2
+uvicorn==0.51.0
+python-multipart==0.0.32
+python-dotenv==1.2.2
+
+# LlamaIndex — packages this service imports directly
+llama-index-core==0.14.23
+llama-index-embeddings-fastembed==0.5.1
+llama-index-vector-stores-qdrant==0.10.2
+llama-index-llms-ollama==0.10.1
+llama-index-llms-groq==0.5.0
+llama-index-readers-file==0.5.6
+llama-index-retrievers-bm25==0.7.1
+
+# Retrieval / storage. No sentence-transformers and no torch: fastembed brings
+# its own onnxruntime, which is the entire point of this file.
+qdrant-client==1.18.0
+rank-bm25==0.2.2
+pypdf==6.14.2

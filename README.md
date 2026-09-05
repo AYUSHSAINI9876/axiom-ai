@@ -2,16 +2,17 @@
 
 [![CI](https://github.com/AYUSHSAINI9876/axiom-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/AYUSHSAINI9876/axiom-ai/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](gateway/)
+[![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](gateway/)
 [![Python](https://img.shields.io/badge/Python-3.10-3776AB?logo=python&logoColor=white)](ml-service/)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](frontend/)
 
-A distributed **Retrieval-Augmented Generation** system for technical and scientific
-literature. Ask questions against your own document corpus and get streamed, cited
-answers grounded in the source text.
+A distributed, multi-tenant **Retrieval-Augmented Generation** system for technical and
+scientific literature. Sign in, upload your own documents, and get streamed, cited
+answers grounded in the source text — with every account's corpus isolated from every
+other's.
 
 Axiom AI runs **hybrid retrieval**: a dense vector search over Qdrant and a BM25
-keyword search over the full corpus, fused with reciprocal rank reranking. Dense search
+keyword search over the corpus, fused with reciprocal rank reranking. Dense search
 alone misses exact identifiers (reaction names, symbols, equation labels); BM25 alone
 misses paraphrase. Fusing them handles both.
 
@@ -21,22 +22,25 @@ misses paraphrase. Fusing them handles both.
 
 ```mermaid
 flowchart LR
-    B[Browser<br/>Next.js 16] -->|SSE / JSON / multipart| G[Go Gateway<br/>Gin :8080]
-    G -->|reverse proxy /api/*| M[ML Service<br/>FastAPI :8000]
-    M -->|dense vectors| Q[(Qdrant<br/>HNSW :6333)]
-    M -->|BM25 over docstore| D[(Local docstore<br/>persisted)]
+    B[Browser<br/>Next.js 16] -->|Bearer JWT + SSE| G[Go Gateway<br/>Gin :8080]
+    G -->|accounts, refresh tokens| P[(Postgres)]
+    G -->|proxy /api/* + X-Axiom-User-Id| M[ML Service<br/>FastAPI :8000]
+    M -->|dense vectors, filtered by user| Q[(Qdrant<br/>HNSW :6333)]
+    M -->|BM25 over the user's nodes| D[(Local docstore<br/>persisted)]
     M -->|generation| L[Llama 3<br/>Ollama or Groq]
 ```
 
 The browser only ever talks to the gateway — a single origin, so CORS is configured in
-exactly one place. The gateway reverse-proxies every `/api/*` route to the ML service,
-transparently handling JSON, multipart uploads, and SSE token streams.
+exactly one place. The gateway is also the **only** authentication boundary: it
+verifies the access token, then reverse-proxies `/api/*` to the ML service with the
+caller's identity stamped on the request.
 
 | Service | Stack | Port | Role |
 | --- | --- | --- | --- |
-| `frontend` | Next.js 16 (App Router), React 19, Tailwind 4 | 3000 | Chat UI, conversation history, uploads |
-| `gateway` | Go 1.25, Gin | 8080 | Reverse proxy, CORS boundary, graceful shutdown |
-| `ml-service` | Python 3.10, FastAPI, LlamaIndex | 8000 | Indexing, hybrid retrieval, LLM orchestration |
+| `frontend` | Next.js 16 (App Router), React 19, Tailwind 4 | 3000 | Auth screens, chat UI, conversation history, uploads |
+| `gateway` | Go 1.26, Gin | 8080 | Auth, reverse proxy, CORS boundary, rate limiting |
+| `ml-service` | Python 3.10, FastAPI, LlamaIndex | 8000 | Per-user indexing, hybrid retrieval, LLM orchestration |
+| `postgres` | Postgres 17 | 5432 | Accounts and refresh tokens |
 | `qdrant` | Qdrant v1.19 | 6333 | Vector store (HNSW) |
 
 ---
@@ -57,9 +61,11 @@ cp .env.example .env      # optional — defaults work as-is
 docker compose up --build
 ```
 
-On Windows you can instead run `./run.ps1`, which checks for Ollama first.
+On Windows you can instead run `./run.ps1`, which checks Docker and Ollama first and
+generates a `JWT_SECRET` into `.env` so your session survives restarts.
 
-Then open **http://localhost:3000**.
+Then open **http://localhost:3000**, and either create an account or click
+**Try the demo account**.
 
 > **First boot takes several minutes.** The ML service downloads the
 > `BAAI/bge-large-en-v1.5` embedding model (~1.3 GB). It's cached in the `hf_cache`
@@ -68,9 +74,70 @@ Then open **http://localhost:3000**.
 
 ### Adding documents
 
-Either drop PDF/Markdown/text files into `data/docs/`, or upload them from the sidebar
-at runtime. Uploads are indexed incrementally — new files are embedded and inserted
-without re-embedding the existing corpus.
+Upload PDF/Markdown/text files from the sidebar. Uploads are indexed incrementally —
+new files are embedded and inserted without re-embedding the existing corpus.
+
+Files placed directly in `data/docs/` act as a **starter corpus**: each new account is
+seeded with a copy on first use, so a fresh sign-up has something to query immediately.
+
+---
+
+## Authentication
+
+Auth lives entirely in the gateway. The ML service has no user model — it is told who
+is calling and trusts that, which is safe because the gateway is the only thing that
+can reach it.
+
+| Method | Route | Description |
+| --- | --- | --- |
+| `POST` | `/auth/register` | Create an account → session |
+| `POST` | `/auth/login` | Email + password → session |
+| `POST` | `/auth/demo` | Sign in to the shared demo account |
+| `POST` | `/auth/refresh` | Exchange a refresh token for a new pair (rotating) |
+| `POST` | `/auth/logout` | Revoke a refresh token |
+| `GET` | `/auth/me` | The signed-in user |
+
+**Design decisions, and why:**
+
+- **Passwords are bcrypt-hashed**, and anything over 72 bytes is rejected rather than
+  silently truncated — bcrypt ignores the remainder, which would quietly weaken a long
+  passphrase to its first 72 bytes.
+- **Access tokens are 15-minute HS256 JWTs**; refresh tokens are 256-bit random values
+  stored only as SHA-256 digests. A database leak yields no usable sessions.
+- **Refresh tokens rotate on every use, with reuse detection.** Replaying a consumed
+  token revokes every session for that account — the signature of a stolen token being
+  replayed after the real client already rotated it.
+- **Login never distinguishes "no such account" from "wrong password"**, and runs a
+  bcrypt comparison against a dummy hash on the unknown-email path so response latency
+  doesn't leak which emails are registered either.
+- **JWT parsing pins HS256.** Without `WithValidMethods`, a token declaring
+  `"alg":"none"` — or an RS256 token whose "public key" is this HMAC secret — would be
+  accepted. That is the classic JWT algorithm-confusion bypass.
+- **Tokens live in `localStorage`, not cookies.** In every deployed configuration the
+  frontend (Vercel) and gateway (Render) are on different sites, so a cookie would need
+  `SameSite=None` — which browsers increasingly block outright. The tradeoff is that
+  `localStorage` is script-readable, which is why access tokens are short-lived and
+  refresh tokens are revocable and rotated.
+- **`JWT_SECRET` has no default.** If unset, the gateway generates a random one per
+  process and logs a warning. A committed fallback secret would be a *shared* secret in
+  every deployment; a random one merely ends sessions on restart.
+- **Credential endpoints are rate limited** to 20 attempts per 15 minutes per IP.
+
+### Per-user isolation
+
+Both halves of the hybrid retriever are filtered independently, in different places:
+
+- The **dense** side pushes a `user_id` payload filter down into Qdrant.
+- **BM25 has no filter support at all**, so its retriever is constructed over only the
+  requesting user's nodes.
+
+Filtering one but not the other would leak another account's text into answers through
+the unfiltered half. `ml-service/tests/test_main.py` asserts this directly: a marker
+phrase present in only one user's document must never surface in another's sources.
+
+The gateway strips any client-supplied `X-Axiom-User-Id`, `X-Axiom-User-Email`, and
+`X-Axiom-Gateway-Key` header before setting its own from the verified token — otherwise
+sending the header yourself would be enough to read someone else's corpus.
 
 ---
 
@@ -78,43 +145,56 @@ without re-embedding the existing corpus.
 
 All variables are optional; the defaults below are what `docker compose` uses.
 
+### `gateway`
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DATABASE_URL` | *(unset)* | Postgres DSN. **Unset falls back to an in-memory store** — fine for a bare `go run`, but accounts vanish on restart. |
+| `JWT_SECRET` | *(random per process)* | Signs access tokens. Set it in production. |
+| `ML_SERVICE_URL` | `http://ml-service:8000` | Proxy target. A scheme-less `host:port` is accepted. |
+| `GATEWAY_SHARED_SECRET` | *(unset)* | Sent to the ML service to prove a request came through the gateway. Required when the ML service is publicly routable. |
+| `PORT` | `8080` | Listen port |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` | Comma-separated. `https://*.vercel.app` matches preview deployments. |
+| `TRUSTED_PROXIES` | *(none)* | `*` to trust `X-Forwarded-For` behind a managed host's edge. |
+| `ACCESS_TOKEN_TTL_MINUTES` | `15` | Access token lifetime |
+| `REFRESH_TOKEN_TTL_DAYS` | `30` | Refresh token lifetime |
+| `DEMO_ACCOUNT_PASSWORD` | *(dev default)* | Password for the shared demo account |
+
 ### `ml-service`
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `QDRANT_URL` | `http://localhost:6333` | Qdrant endpoint |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint (used when `GROQ_API_KEY` is unset) |
+| `QDRANT_API_KEY` | *(unset)* | Required by Qdrant Cloud |
+| `EMBED_BACKEND` | `huggingface` | `fastembed` for the ONNX/no-torch deployment path |
+| `EMBED_MODEL` | `BAAI/bge-large-en-v1.5` | `BAAI/bge-small-en-v1.5` under `fastembed` |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Used when `GROQ_API_KEY` is unset |
 | `GROQ_API_KEY` | *(unset)* | If set, uses Groq-hosted Llama 3 instead of Ollama |
-| `DATA_DIR` | `./data/docs` | Corpus directory |
+| `LLM_MODEL` | `llama3` / `llama-3.3-70b-versatile` | Depends on the backend |
+| `GATEWAY_SHARED_SECRET` | *(unset)* | When set, rejects any request without the matching key |
+| `DATA_DIR` | `./data/docs` | Corpus root; each user gets a subdirectory |
 | `PERSIST_DIR` | `./storage` | Docstore/index metadata (survives restarts) |
 | `AXIOM_SKIP_MODEL_INIT` | *(unset)* | `1` skips model init — used by the test suite |
-
-### `gateway`
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `ML_SERVICE_URL` | `http://ml-service:8000` | Proxy target |
-| `PORT` | `8080` | Listen port |
-| `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` | Comma-separated allowed browser origins |
 
 ### `frontend`
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `NEXT_PUBLIC_API_URL` | `http://localhost:8080` | Gateway base URL. **Build-time** — `NEXT_PUBLIC_*` is inlined into the client bundle, so Compose passes it as a build arg. |
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8080` | Gateway base URL. **Build-time** — `NEXT_PUBLIC_*` is inlined into the client bundle. |
 
 ---
 
 ## API
 
-All routes are reachable through the gateway under `/api/*`.
+Every `/api/*` route requires `Authorization: Bearer <access token>`.
 
 | Method | Route | Description |
 | --- | --- | --- |
-| `GET` | `/health` | Gateway liveness (does not touch the ML service) |
-| `GET` | `/api/health` | ML service status: LLM backend, embedding model, index state, doc count |
-| `GET` | `/api/documents` | List indexed documents |
+| `GET` | `/health` | Gateway liveness — public, does not touch the ML service |
+| `GET` | `/api/health` | ML status: LLM backend, embedding model, index state, your doc count |
+| `GET` | `/api/documents` | List your indexed documents |
 | `POST` | `/api/upload` | Upload and incrementally index a document (multipart) |
+| `DELETE` | `/api/documents/{name}` | Remove a document from disk, Qdrant, and the docstore |
 | `POST` | `/api/chat` | Non-streaming query → answer + source nodes |
 | `POST` | `/api/chat/stream` | SSE stream of `token` / `sources` / `done` / `error` frames |
 
@@ -122,19 +202,21 @@ All routes are reachable through the gateway under `/api/*`.
 
 ## Features
 
+- **Accounts** — register, sign in, one-click demo, rotating refresh tokens, sign-out
+  everywhere on token reuse.
+- **Per-user corpora** — documents, retrieval, and conversation history are scoped to
+  the signed-in account.
 - **Hybrid search** — `QueryFusionRetriever` reciprocally reranks a dense vector
-  retriever against a `BM25Retriever` built over the full corpus docstore.
-- **Streamed answers** — tokens flow from the LLM through FastAPI SSE, the Go proxy, and
-  into the browser, with a working "Stop generating" control.
+  retriever against a `BM25Retriever`.
+- **Streamed answers** — tokens flow from the LLM through FastAPI SSE, the Go proxy,
+  and into the browser, with a working "Stop generating" control.
 - **Citations** — every answer lists the source chunks (file + relevance score) it was
-  grounded in.
-- **Incremental indexing** — uploads are embedded and inserted without rebuilding.
-- **Persisted index** — the docstore survives restarts, so documents aren't silently
-  re-embedded and duplicated in Qdrant.
-- **Multi-conversation sidebar** — conversations persist in `localStorage` with
-  auto-generated titles, switching, and delete.
+  grounded in, expandable inline.
+- **Incremental indexing and deletion** — uploads are inserted without rebuilding;
+  deletes remove nodes from Qdrant *and* the docstore so they stop being cited.
+- **Light/dark/system theming** — applied before first paint, so there's no flash.
 - **Accessible, responsive UI** — mobile drawer sidebar, keyboard-navigable, live region
-  for streamed output.
+  for streamed output, `prefers-reduced-motion` respected.
 - **Graceful degradation** — if the ML service or Ollama is down, the UI shows a clear
   error instead of hanging.
 
@@ -148,6 +230,12 @@ A few decisions that aren't obvious from the file tree:
   LlamaIndex skips writing nodes to the local docstore by default. But `BM25Retriever`
   reads its corpus from that docstore — without the flag, the BM25 half of the hybrid
   retriever silently searches an empty corpus.
+- **`delete_nodes` needs `delete_from_docstore=True`.** It defaults to false, which
+  clears the vectors but leaves the nodes in the docstore — so a "deleted" document
+  keeps coming back as a citation through the BM25 half. Caught by a test, not by hand.
+- **The Qdrant collection name encodes the embedding model.** Vector dimensionality is
+  fixed per collection (1024 for bge-large, 384 for bge-small), so switching backends
+  against a shared name would fail every upsert on a dimension mismatch.
 - **The ML service sets no CORS headers.** Only the gateway does. If both did, the proxy
   would forward duplicate `Access-Control-Allow-Origin` headers and browsers would reject
   the response.
@@ -156,42 +244,117 @@ A few decisions that aren't obvious from the file tree:
 - **No `WriteTimeout` on the gateway's HTTP server.** It's an absolute deadline on the
   whole response, which would truncate long token streams mid-answer. Slowloris is
   handled with `ReadHeaderTimeout` instead.
+- **Refresh rotation is an atomic `UPDATE … WHERE revoked = FALSE … RETURNING`.** A
+  separate `SELECT` then `UPDATE` would let two concurrent refreshes both succeed.
+- **The frontend shares one in-flight refresh across callers.** Several parallel 401s
+  would otherwise each send the same refresh token, and rotation means all but the first
+  get rejected as reuse — logging the user out.
 - **Gateway tests run against a real `httptest` server**, not `httptest.NewRecorder()` —
   `httputil.ReverseProxy` probes the writer for `http.CloseNotifier`, which a recorder
   doesn't implement and panics on.
+- **`modernc.org/sqlite` was considered and rejected.** It is a million-line generated C
+  translation that needs gigabytes of RAM to compile; Postgres plus a small in-memory
+  implementation covers the same ground with no build cost.
+
+---
+
+## Deployment
+
+The frontend goes to **Vercel**, the two backend services and their database to
+**Render**. Blueprints for both are in the repo: [`vercel.json`](vercel.json) and
+[`render.yaml`](render.yaml).
+
+### 1. Qdrant Cloud (free)
+
+Render has no managed vector store, so create a free cluster at
+[cloud.qdrant.io](https://cloud.qdrant.io/) and keep its **URL** and **API key**.
+
+### 2. Groq (free)
+
+Ollama is local-only and cannot be reached from a managed host, so the deployed ML
+service needs a hosted LLM. Get a key at [console.groq.com](https://console.groq.com/keys).
+
+### 3. Render — backend
+
+Dashboard → **New → Blueprint** → select this repo. `render.yaml` provisions Postgres,
+the gateway, and the ML service, and wires `DATABASE_URL`, `JWT_SECRET`,
+`ML_SERVICE_URL`, and `GATEWAY_SHARED_SECRET` between them automatically.
+
+You'll be prompted for the three values that come from outside the repo:
+`QDRANT_URL`, `QDRANT_API_KEY`, `GROQ_API_KEY`. Leave `CORS_ALLOWED_ORIGINS` blank for
+now — you don't have the Vercel URL yet.
+
+Note that the ML service deploys from `Dockerfile.lite`, which swaps
+sentence-transformers/torch for fastembed's ONNX runtime. The default image needs well
+over a gigabyte of resident memory for `bge-large`; the lite one fits a small plan.
+
+### 4. Vercel — frontend
+
+Import the repo, then set:
+
+- **Root Directory**: `frontend`
+- **Environment variable**: `NEXT_PUBLIC_API_URL` = your gateway URL
+  (e.g. `https://axiom-gateway.onrender.com`)
+
+`NEXT_PUBLIC_*` is inlined at build time, so this must be set *before* the first build
+— changing it later requires a redeploy, not just a restart.
+
+### 5. Close the loop
+
+Back on Render, set the gateway's `CORS_ALLOWED_ORIGINS` to your Vercel domain plus the
+preview wildcard:
+
+```
+https://your-app.vercel.app,https://*.vercel.app
+```
+
+Render redeploys the gateway automatically. Open the Vercel URL and sign in.
+
+> **On Render's free tier**, services sleep after 15 minutes idle, so the first request
+> after a pause takes ~30 seconds while the container wakes. The free Postgres plan also
+> expires after 30 days.
 
 ---
 
 ## Testing
 
 ```bash
-# gateway — go vet + 7 tests / 13 cases (proxy, SSE, 502 fallback, config)
+# gateway — go vet + 21 tests (auth, proxy, SSE, isolation, config)
 cd gateway && go vet ./... && go test ./...
 
-# ml-service — 5 tests (health, upload→retrieve, streaming, guards)
+# ml-service — 16 tests (health, upload→retrieve, streaming, per-user isolation)
 cd ml-service && pip install -r requirements-dev.txt && pytest
 
-# frontend — lint + 19 tests + production build
+# frontend — lint + 29 tests + production build
 cd frontend && npm ci && npm run lint && npm run test && npm run build
 ```
 
-CI runs all three suites plus Docker image builds and a Compose config check on every
-push and PR.
+CI runs all three suites, both Docker image variants, a `render.yaml` check, and an
+end-to-end auth smoke test against a real Postgres on every push and PR.
 
 ### Manual QA checklist
 
 After `docker compose up --build`:
 
-1. `http://localhost:3000` loads with a "connected" status indicator.
-2. Upload a document from the sidebar; it appears in the document list.
-3. Ask a question answerable from that doc — the response streams token-by-token with
-   citation chips naming the right file.
-4. Ask a dependent follow-up to confirm conversation history reaches the model.
-5. Click "Stop generating" mid-stream — generation halts cleanly.
-6. Create a second conversation, switch between them, reload — both persist.
-7. Resize to mobile width — the sidebar collapses into a drawer.
-8. Stop the gateway and send a message — a clear error appears instead of a hang.
-9. Tab through the UI with the keyboard only — all controls are reachable.
+1. `http://localhost:3000` shows the sign-in screen, not the chat UI.
+2. Create an account — you land in the chat with a "connected" status indicator.
+3. The sidebar already lists the starter document seeded for your account.
+4. Upload a document; it appears in the list.
+5. Ask a question answerable from that doc — the response streams token-by-token with
+   citation chips naming the right file. Click one to expand the source text.
+6. Ask a dependent follow-up to confirm conversation history reaches the model.
+7. Click "Stop generating" mid-stream — generation halts cleanly.
+8. Create a second conversation, switch between them, reload — both persist.
+9. **Sign out, register a second account.** The sidebar is empty of the first account's
+   conversations, and its uploaded document is not listed.
+10. Ask the second account about content only in the first account's document — it must
+    answer that it doesn't have the information, and cite nothing from that file.
+11. Toggle the theme (top right) — light, dark, system. Reload; the choice sticks with
+    no flash of the wrong theme.
+12. Resize to mobile width — the sidebar collapses into a drawer.
+13. Stop the gateway and send a message — a clear error appears instead of a hang.
+14. Tab through the UI with the keyboard only — all controls are reachable and the
+    focus ring is visible.
 
 ---
 
@@ -199,17 +362,23 @@ After `docker compose up --build`:
 
 ```
 .
-├── data/docs/              # Document corpus (sample included)
-├── frontend/               # Next.js 16 chat UI
-│   └── src/{app,components,lib}
-├── gateway/                # Go reverse proxy
-│   ├── main.go
-│   └── main_test.go
+├── data/docs/              # Starter corpus, copied into each new account
+├── frontend/               # Next.js 16 UI
+│   └── src/{app,components,context,lib}
+├── gateway/                # Go reverse proxy + auth
+│   ├── auth.go             # handlers + requireAuth middleware
+│   ├── token.go            # JWT issuing/verification
+│   ├── store*.go           # Store interface, Postgres and in-memory impls
+│   ├── ratelimit.go
+│   └── main.go
 ├── ml-service/             # FastAPI + LlamaIndex
 │   ├── main.py
+│   ├── Dockerfile.lite     # ONNX/no-torch deployment image
 │   └── tests/
 ├── .github/workflows/ci.yml
 ├── docker-compose.yml
+├── render.yaml             # Render blueprint (gateway + ml-service + Postgres)
+├── vercel.json             # Vercel config (frontend)
 └── run.ps1                 # Windows convenience wrapper
 ```
 

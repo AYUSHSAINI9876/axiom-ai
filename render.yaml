@@ -1,0 +1,103 @@
+# Render blueprint — the gateway, the ML service, and their Postgres.
+#
+# Deploy with:  Render dashboard → New → Blueprint → point at this repo.
+#
+# The frontend is NOT here: it is a Next.js app and belongs on Vercel (see
+# vercel.json). Render hosts the two backend services that Vercel can't.
+#
+# Two values are prompted at deploy time (sync: false) because they come from
+# accounts outside this repo:
+#   QDRANT_URL / QDRANT_API_KEY  — a Qdrant Cloud cluster (the free tier is
+#                                  ample; Render has no managed vector store)
+#   GROQ_API_KEY                 — hosted Llama 3. Required here: Ollama is a
+#                                  local-only fallback and cannot be reached
+#                                  from a managed host.
+
+databases:
+  - name: axiom-postgres
+    databaseName: axiom
+    user: axiom
+    plan: free
+
+services:
+  # ---- ML service -------------------------------------------------------
+  #
+  # Built from Dockerfile.lite, which swaps sentence-transformers/torch for
+  # fastembed's ONNX runtime. The default image needs well over a gigabyte of
+  # resident memory for BAAI/bge-large; the lite one fits in a small plan.
+  #
+  # `type: web` rather than `pserv` because Render's free tier has no private
+  # services — which means this gets a public URL. GATEWAY_SHARED_SECRET is
+  # what keeps that from being an open door: the service has no auth of its own
+  # and trusts the X-Axiom-User-Id header the gateway sets.
+  - type: web
+    name: axiom-ml-service
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./ml-service/Dockerfile.lite
+    dockerContext: ./ml-service
+    healthCheckPath: /health
+    envVars:
+      - key: EMBED_BACKEND
+        value: fastembed
+      - key: EMBED_MODEL
+        value: BAAI/bge-small-en-v1.5
+      - key: DATA_DIR
+        value: /app/data/docs
+      - key: PERSIST_DIR
+        value: /app/storage
+      - key: GATEWAY_SHARED_SECRET
+        generateValue: true
+      - key: QDRANT_URL
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+
+  # ---- Gateway ----------------------------------------------------------
+  - type: web
+    name: axiom-gateway
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./gateway/Dockerfile
+    dockerContext: ./gateway
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: axiom-postgres
+          property: connectionString
+      # Signed with a value Render generates and stores — never one from the
+      # repo. Changing it invalidates every live session, which is the intended
+      # behaviour for a key rotation.
+      - key: JWT_SECRET
+        generateValue: true
+      # Resolves to the ML service's "host:port". The gateway prepends http://
+      # when the value has no scheme, which is why this works as-is.
+      - key: ML_SERVICE_URL
+        fromService:
+          type: web
+          name: axiom-ml-service
+          property: hostport
+      # Copies the secret Render generated for the ML service, so the two agree
+      # without either value being written down here.
+      - key: GATEWAY_SHARED_SECRET
+        fromService:
+          type: web
+          name: axiom-ml-service
+          envVarKey: GATEWAY_SHARED_SECRET
+      # Render terminates TLS at its edge, so the client address arrives in
+      # X-Forwarded-For. Trusting it is what makes the auth rate limiter key on
+      # the real caller instead of on Render's proxy.
+      - key: TRUSTED_PROXIES
+        value: "*"
+      # Set this to your Vercel domain after the frontend deploys. The wildcard
+      # entry covers Vercel's per-branch preview hostnames, which are generated
+      # and so can't be listed exactly.
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: DEMO_ACCOUNT_PASSWORD
+        generateValue: true
