@@ -84,16 +84,19 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     return refreshInFlight.current;
   }, [setBoth]);
 
-  // Register the token accessors with the API layer exactly once, before any
-  // child can fire a request.
+  // Hand the API layer the in-memory token (fresher than storage after a
+  // refresh) and the coordinated refresh callback. api.ts falls back to reading
+  // stored session until this runs, so the child-first effect ordering doesn't
+  // leave an early request unauthenticated.
   useEffect(() => {
     configureAuth(() => sessionRef.current?.accessToken ?? null, refresh);
   }, [refresh]);
 
   useEffect(() => {
-    // Reading localStorage during render would break SSR hydration, so the
-    // first client render matches the server's "signed out" markup and the
-    // stored session lands on the next one. isReady gates the UI meanwhile.
+    // Adopt the stored session into render state. This has to wait for an
+    // effect: localStorage is unavailable during SSR, so the first client
+    // render must match the server's "signed out" markup and the session
+    // becomes visible only on the next one. isReady gates the UI meanwhile.
     const stored = loadSession();
     if (stored) {
       sessionRef.current = stored;

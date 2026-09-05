@@ -1,3 +1,4 @@
+import { loadSession } from "./session-storage";
 import type { Citation, DocumentInfo, Role } from "./types";
 
 export const API_BASE =
@@ -13,17 +14,25 @@ export interface HistoryItem {
    ---------------------------------------------------------------------------
    Every /api/* call needs a bearer token, and the token expires every 15
    minutes. Rather than thread it through each call site, the AuthProvider
-   registers a getter and a refresh callback here once; the request helpers
-   below use them to attach the header and to retry exactly once after a 401.
+   registers a getter and a refresh callback here; the request helpers below use
+   them to attach the header and to retry exactly once after a 401.
 
    Module-level state (not React state) because `streamChat` and friends are
    plain async functions called from event handlers, not hooks.
+
+   The default getter reads stored session directly, so it works before any
+   provider has mounted. That matters: React flushes effects child-first, so a
+   component firing a request from its own mount effect would otherwise race the
+   provider's registration and send the request with no token at all.
 --------------------------------------------------------------------------- */
 
 type TokenGetter = () => string | null;
 type TokenRefresher = () => Promise<string | null>;
 
-let getAccessToken: TokenGetter = () => null;
+let getAccessToken: TokenGetter = () => loadSession()?.accessToken ?? null;
+// No default refresher: rotating a refresh token without the provider knowing
+// would leave it holding a token the server has already revoked. Until the
+// provider registers one, a 401 simply surfaces.
 let refreshAccessToken: TokenRefresher = async () => null;
 
 export function configureAuth(getter: TokenGetter, refresher: TokenRefresher): void {
