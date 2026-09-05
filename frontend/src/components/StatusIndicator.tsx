@@ -25,27 +25,45 @@ export default function StatusIndicator() {
   }, []);
 
   const online = Boolean(health?.gatewayOnline && health?.mlServiceOnline);
-  const label = !health
-    ? "Checking connection…"
-    : online
-      ? `${health.docCount ?? 0} document${health.docCount === 1 ? "" : "s"} indexed • Llama 3 via ${
-          health.llmBackend === "groq" ? "Groq" : "Ollama"
-        }`
-      : !health.gatewayOnline
-        ? "Gateway offline"
-        : "ML service offline";
+  const state = !health ? "checking" : online ? "online" : "offline";
+
+  const docs = health?.docCount ?? 0;
+  const backend = health?.llmBackend === "groq" ? "Groq" : "Ollama";
+
+  const label =
+    state === "checking"
+      ? "Checking connection…"
+      : state === "online"
+        ? `${docs} document${docs === 1 ? "" : "s"} · ${backend}`
+        : !health?.gatewayOnline
+          ? "Gateway offline"
+          : "ML service warming up";
+
+  const detail =
+    state === "online"
+      ? `${docs} document${docs === 1 ? "" : "s"} indexed · ${health?.llmModel ?? "Llama 3"} via ${backend} · ${health?.embeddingModel ?? "BGE"} embeddings`
+      : label;
+
+  const dotColor =
+    state === "online" ? "bg-emerald" : state === "offline" ? "bg-rose" : "bg-amber";
 
   return (
-    <div className="flex items-center gap-2" title={label}>
-      <span
-        className={`h-2 w-2 rounded-full shrink-0 ${
-          online ? "bg-emerald-400 animate-pulse" : health ? "bg-red-400" : "bg-yellow-400"
-        }`}
-        aria-hidden="true"
-      />
-      <span className="text-[11px] text-gray-400 truncate max-w-[160px] sm:max-w-none">
+    <div
+      className="glass flex items-center gap-2 rounded-full py-1 pl-2.5 pr-3"
+      title={detail}
+    >
+      <span className="relative flex h-2 w-2 shrink-0" aria-hidden="true">
+        {state === "online" && (
+          <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${dotColor} opacity-60`} />
+        )}
+        <span className={`relative inline-flex h-2 w-2 rounded-full ${dotColor}`} />
+      </span>
+      <span className="max-w-36 truncate text-[11px] font-medium text-fg-muted sm:max-w-none">
         {label}
       </span>
+      {/* The visible label is abbreviated to fit the header; the full detail
+          only lives in the tooltip, which a screen reader won't read. */}
+      <span className="sr-only">{detail}</span>
     </div>
   );
 }

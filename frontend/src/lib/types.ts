@@ -28,3 +28,29 @@ export interface DocumentInfo {
   size_bytes: number;
   modified: string;
 }
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  created_at: string;
+}
+
+/** The gateway's wire format for a new session. */
+export interface Session {
+  user: User;
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+  token_type: string;
+}
+
+/** The client-side shape: camelCase, with the expiry resolved to a timestamp. */
+export interface StoredSession {
+  user: User;
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+}
+
+export type Theme = "light" | "dark" | "system";

@@ -1,6 +1,22 @@
 name: axiom-ai
 
 services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=axiom
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-axiom-local-dev}
+      - POSTGRES_DB=axiom
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U axiom -d axiom"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
   qdrant:
     image: qdrant/qdrant:v1.19.0
     restart: unless-stopped
@@ -54,11 +70,23 @@ services:
       - ML_SERVICE_URL=http://ml-service:8000
       - PORT=8080
       - CORS_ALLOWED_ORIGINS=http://localhost:3000
+      - DATABASE_URL=postgres://axiom:${POSTGRES_PASSWORD:-axiom-local-dev}@postgres:5432/axiom?sslmode=disable
+      # Signs access tokens. Left empty here on purpose — a secret committed to
+      # the repo would be a secret in every deployment. The gateway generates an
+      # ephemeral one and logs a warning, which only means sessions end when the
+      # container restarts. Set JWT_SECRET in .env to keep them across restarts.
+      - JWT_SECRET=${JWT_SECRET:-}
+      - DEMO_ACCOUNT_PASSWORD=${DEMO_ACCOUNT_PASSWORD:-}
     depends_on:
-      # Deliberately service_started, not service_healthy: the gateway answers
-      # /health on its own and returns a clean 502 while ml-service is still
-      # loading its model, so gating startup would only delay the UI.
-      - ml-service
+      postgres:
+        # The gateway can't serve auth without its database, and unlike the ML
+        # service there is no useful degraded mode to start into.
+        condition: service_healthy
+      ml-service:
+        # Deliberately service_started, not service_healthy: the gateway answers
+        # /health on its own and returns a clean 502 while ml-service is still
+        # loading its model, so gating startup would only delay the UI.
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
       interval: 15s
@@ -86,6 +114,7 @@ services:
       start_period: 15s
 
 volumes:
+  postgres_data:
   qdrant_data:
   ml_storage:
   hf_cache:

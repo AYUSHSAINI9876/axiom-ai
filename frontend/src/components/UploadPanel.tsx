@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchDocuments, uploadDocument } from "@/lib/api";
+import { deleteDocument, fetchDocuments, uploadDocument } from "@/lib/api";
+import { useToast } from "@/context/ToastProvider";
 import type { DocumentInfo } from "@/lib/types";
 
 interface Props {
@@ -9,16 +10,17 @@ interface Props {
 }
 
 export default function UploadPanel({ onUploaded }: Props) {
+  const { notify } = useToast();
   const [documents, setDocuments] = useState<DocumentInfo[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const docs = await fetchDocuments();
-      setDocuments(docs);
+      setDocuments(await fetchDocuments());
     } catch {
       // Document list is best-effort; keep whatever was last shown on failure.
     }
@@ -42,11 +44,31 @@ export default function UploadPanel({ onUploaded }: Props) {
       }
       await refresh();
       onUploaded?.();
+      notify(
+        files.length === 1 ? `Indexed ${files[0].name}` : `Indexed ${files.length} documents`,
+        "success"
+      );
     } catch (err) {
-      setError((err as Error).message);
+      const message = (err as Error).message;
+      setError(message);
+      notify(message, "error");
     } finally {
       setIsUploading(false);
       if (inputRef.current) inputRef.current.value = "";
+    }
+  };
+
+  const handleDelete = async (name: string) => {
+    setPendingDelete(name);
+    try {
+      await deleteDocument(name);
+      await refresh();
+      onUploaded?.();
+      notify(`Removed ${name}`, "success");
+    } catch (err) {
+      notify((err as Error).message, "error");
+    } finally {
+      setPendingDelete(null);
     }
   };
 
@@ -72,10 +94,10 @@ export default function UploadPanel({ onUploaded }: Props) {
             inputRef.current?.click();
           }
         }}
-        className={`cursor-pointer rounded-xl border border-dashed p-4 text-center text-xs transition-colors ${
+        className={`focus-ring cursor-pointer rounded-xl border border-dashed px-3 py-4 text-center transition-colors ${
           isDragging
-            ? "border-cyan-400 bg-cyan-500/10"
-            : "border-white/15 hover:border-white/30"
+            ? "border-amber bg-amber/10"
+            : "border-border-strong hover:border-amber/60 hover:bg-amber/5"
         }`}
       >
         <input
@@ -86,28 +108,61 @@ export default function UploadPanel({ onUploaded }: Props) {
           className="hidden"
           onChange={(e) => handleFiles(e.target.files)}
         />
-        <span className="text-gray-400">
-          {isUploading
-            ? "Uploading…"
-            : "Drop a document or click to upload (PDF, Markdown, text)"}
-        </span>
+        <svg
+          className={`mx-auto mb-1.5 h-5 w-5 ${isDragging ? "text-amber" : "text-fg-subtle"}`}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.6}
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M7 16a4 4 0 01-.88-7.9A5 5 0 1115.9 6H16a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+          />
+        </svg>
+        <p className="text-[12px] font-medium text-fg-muted">
+          {isUploading ? "Indexing…" : "Drop files or click to upload"}
+        </p>
+        <p className="mt-0.5 text-[10px] text-fg-subtle">PDF · Markdown · text</p>
       </div>
 
-      {error && <p className="text-[11px] text-red-400">{error}</p>}
+      {error && <p className="text-[11px] text-rose">{error}</p>}
 
-      <ul className="flex flex-col gap-1 max-h-40 overflow-y-auto scrollbar-hide">
+      <ul className="scrollbar-thin flex max-h-48 flex-col gap-1 overflow-y-auto">
         {documents.length === 0 && (
-          <li className="text-[11px] text-gray-500">No documents indexed yet.</li>
+          <li className="px-1 text-[11px] text-fg-subtle">No documents indexed yet.</li>
         )}
         {documents.map((doc) => (
           <li
             key={doc.name}
-            className="flex items-center justify-between text-[11px] text-gray-400 bg-white/5 rounded-lg px-2.5 py-1.5"
+            className="group/doc flex items-center gap-2 rounded-lg border border-transparent px-2 py-1.5 transition-colors hover:border-border hover:bg-surface"
           >
-            <span className="truncate">{doc.name}</span>
-            <span className="text-gray-600 shrink-0 ml-2">
-              {formatBytes(doc.size_bytes)}
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-amber/15 text-amber">
+              <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                />
+              </svg>
             </span>
+            <span className="min-w-0 flex-1 truncate text-[11px] text-fg-muted" title={doc.name}>
+              {doc.name}
+            </span>
+            <span className="shrink-0 text-[10px] text-fg-subtle">{formatBytes(doc.size_bytes)}</span>
+            <button
+              type="button"
+              onClick={() => handleDelete(doc.name)}
+              disabled={pendingDelete === doc.name}
+              aria-label={`Remove ${doc.name}`}
+              className="focus-ring shrink-0 rounded p-0.5 text-fg-subtle opacity-0 transition-all hover:text-rose focus-visible:opacity-100 group-hover/doc:opacity-100 disabled:opacity-50"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </li>
         ))}
       </ul>

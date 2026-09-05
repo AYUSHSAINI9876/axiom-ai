@@ -1,9 +1,150 @@
 @import "tailwindcss";
 
+/* ---------------------------------------------------------------------------
+   Design tokens
+   ---------------------------------------------------------------------------
+   Axiom's palette is built from four hues that each carry a fixed meaning, so
+   colour is information rather than decoration:
+
+     violet  → the product itself (brand, primary actions, the assistant)
+     cyan    → retrieval (citations, sources, the index)
+     amber   → documents and uploads
+     emerald → healthy system state          rose → errors and destructive acts
+
+   Every token is defined on bare :root first. The dark and light overrides
+   below only *redefine* them, so no colour has its sole definition inside a
+   media query — a rule that keeps the theme toggle working in both directions.
+--------------------------------------------------------------------------- */
+
 :root {
-  --background: #0a0a0b;
-  --foreground: #e4e4e7;
-  --accent: #06b6d4;
+  color-scheme: light;
+
+  --bg: #f6f5fb;
+  --bg-elevated: #ffffff;
+  --bg-sunken: #eeecf7;
+  --surface: rgba(255, 255, 255, 0.72);
+  --surface-strong: rgba(255, 255, 255, 0.92);
+  --border: rgba(15, 12, 41, 0.1);
+  --border-strong: rgba(15, 12, 41, 0.18);
+
+  --fg: #17162a;
+  --fg-muted: #55516e;
+  --fg-subtle: #817ca0;
+
+  --violet: #7c3aed;
+  --violet-soft: #a78bfa;
+  --fuchsia: #c026d3;
+  --cyan: #0891b2;
+  --cyan-soft: #22d3ee;
+  --amber: #d97706;
+  --emerald: #059669;
+  --rose: #e11d48;
+
+  --on-accent: #ffffff;
+
+  --ring: rgba(124, 58, 237, 0.45);
+  --shadow-sm: 0 1px 2px rgba(15, 12, 41, 0.06), 0 1px 3px rgba(15, 12, 41, 0.08);
+  --shadow-lg: 0 10px 30px -10px rgba(15, 12, 41, 0.25);
+  --shadow-glow: 0 0 32px -8px rgba(124, 58, 237, 0.45);
+
+  /* The signature gradient. Reused for the logo, primary buttons and the
+     auth-page hero so they read as one family. */
+  --gradient-brand: linear-gradient(135deg, #7c3aed 0%, #c026d3 50%, #0891b2 100%);
+  --gradient-aurora: radial-gradient(
+      1200px 600px at 12% -10%,
+      rgba(124, 58, 237, 0.18),
+      transparent 60%
+    ),
+    radial-gradient(900px 500px at 88% 0%, rgba(192, 38, 211, 0.14), transparent 55%),
+    radial-gradient(800px 600px at 60% 100%, rgba(8, 145, 178, 0.16), transparent 60%);
+}
+
+/* System-preference dark. Guarded with :not([data-theme="light"]) so an
+   explicit light choice still wins on a machine set to dark. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --bg: #0a0a12;
+    --bg-elevated: #13131f;
+    --bg-sunken: #07070d;
+    --surface: rgba(255, 255, 255, 0.05);
+    --surface-strong: rgba(255, 255, 255, 0.09);
+    --border: rgba(255, 255, 255, 0.1);
+    --border-strong: rgba(255, 255, 255, 0.18);
+
+    --fg: #ecebf5;
+    --fg-muted: #a9a5c4;
+    --fg-subtle: #7b7799;
+
+    --violet: #a78bfa;
+    --violet-soft: #c4b5fd;
+    --fuchsia: #e879f9;
+    --cyan: #22d3ee;
+    --cyan-soft: #67e8f9;
+    --amber: #fbbf24;
+    --emerald: #34d399;
+    --rose: #fb7185;
+
+    --on-accent: #0a0a12;
+
+    --ring: rgba(167, 139, 250, 0.5);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 16px 40px -12px rgba(0, 0, 0, 0.7);
+    --shadow-glow: 0 0 40px -8px rgba(167, 139, 250, 0.35);
+
+    --gradient-brand: linear-gradient(135deg, #a78bfa 0%, #e879f9 50%, #22d3ee 100%);
+    --gradient-aurora: radial-gradient(
+        1200px 600px at 12% -10%,
+        rgba(124, 58, 237, 0.3),
+        transparent 60%
+      ),
+      radial-gradient(900px 500px at 88% 0%, rgba(192, 38, 211, 0.22), transparent 55%),
+      radial-gradient(800px 600px at 60% 100%, rgba(8, 145, 178, 0.24), transparent 60%);
+  }
+}
+
+/* Explicit choice from the theme toggle. Repeats the dark block so the toggle
+   overrides a light system preference too. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #0a0a12;
+  --bg-elevated: #13131f;
+  --bg-sunken: #07070d;
+  --surface: rgba(255, 255, 255, 0.05);
+  --surface-strong: rgba(255, 255, 255, 0.09);
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.18);
+
+  --fg: #ecebf5;
+  --fg-muted: #a9a5c4;
+  --fg-subtle: #7b7799;
+
+  --violet: #a78bfa;
+  --violet-soft: #c4b5fd;
+  --fuchsia: #e879f9;
+  --cyan: #22d3ee;
+  --cyan-soft: #67e8f9;
+  --amber: #fbbf24;
+  --emerald: #34d399;
+  --rose: #fb7185;
+
+  --on-accent: #0a0a12;
+
+  --ring: rgba(167, 139, 250, 0.5);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 16px 40px -12px rgba(0, 0, 0, 0.7);
+  --shadow-glow: 0 0 40px -8px rgba(167, 139, 250, 0.35);
+
+  --gradient-brand: linear-gradient(135deg, #a78bfa 0%, #e879f9 50%, #22d3ee 100%);
+  --gradient-aurora: radial-gradient(
+      1200px 600px at 12% -10%,
+      rgba(124, 58, 237, 0.3),
+      transparent 60%
+    ),
+    radial-gradient(900px 500px at 88% 0%, rgba(192, 38, 211, 0.22), transparent 55%),
+    radial-gradient(800px 600px at 60% 100%, rgba(8, 145, 178, 0.24), transparent 60%);
 }
 
 html,
@@ -12,49 +153,162 @@ body {
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: "Inter", sans-serif;
+  background-color: var(--bg);
+  background-image: var(--gradient-aurora);
+  background-attachment: fixed;
+  color: var(--fg);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
 }
 
-@keyframes gradient {
-  0% {
+/* Expose the tokens to Tailwind's utility layer so `bg-surface`,
+   `text-fg-muted`, `border-border` and friends work directly in markup. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-bg-sunken: var(--bg-sunken);
+  --color-surface: var(--surface);
+  --color-surface-strong: var(--surface-strong);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-violet: var(--violet);
+  --color-violet-soft: var(--violet-soft);
+  --color-fuchsia: var(--fuchsia);
+  --color-cyan: var(--cyan);
+  --color-cyan-soft: var(--cyan-soft);
+  --color-amber: var(--amber);
+  --color-emerald: var(--emerald);
+  --color-rose: var(--rose);
+  --color-on-accent: var(--on-accent);
+}
+
+/* ---------------------------------------------------------------------------
+   Reusable pieces
+--------------------------------------------------------------------------- */
+
+.gradient-brand {
+  background-image: var(--gradient-brand);
+}
+
+.gradient-text {
+  background-image: var(--gradient-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.glass {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+}
+
+.glow {
+  box-shadow: var(--shadow-glow);
+}
+
+.focus-ring:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: var(--border-strong);
+  border-radius: 999px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* A slow hue drift across the brand gradient. Used sparingly — the auth hero
+   and the app's ambient background — so it reads as atmosphere, not motion. */
+@keyframes aurora-drift {
+  0%,
+  100% {
     background-position: 0% 50%;
   }
   50% {
     background-position: 100% 50%;
   }
-  100% {
-    background-position: 0% 50%;
+}
+
+.animate-aurora {
+  background-size: 220% 220%;
+  animation: aurora-drift 18s ease-in-out infinite;
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 
-.bg-animate {
-  background: linear-gradient(-45deg, #0a0a0b, #111827, #1e1b4b, #0a0a0b);
-  background-size: 400% 400%;
-  animation: gradient 15s ease infinite;
+.animate-rise {
+  animation: rise-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.glow {
-  box-shadow: 0 0 20px rgba(6, 182, 212, 0.2);
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
 }
 
-.scrollbar-hide {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+.shimmer {
+  position: relative;
+  overflow: hidden;
 }
-.scrollbar-hide::-webkit-scrollbar {
-  width: 6px;
-}
-.scrollbar-hide::-webkit-scrollbar-thumb {
-  background-color: rgba(255, 255, 255, 0.15);
-  border-radius: 999px;
+.shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background-image: linear-gradient(
+    90deg,
+    transparent,
+    var(--surface-strong),
+    transparent
+  );
+  animation: shimmer 1.6s infinite;
 }
 
-/* Minimal hand-written markdown styling for assistant responses, so we don't
-   need to pull in the Tailwind typography plugin for a handful of elements. */
+/* Respect a reduced-motion preference: the ambient animations are decorative,
+   so they stop entirely rather than merely slowing down. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Assistant markdown
+   Hand-written rather than pulling in @tailwindcss/typography for a dozen
+   elements, and driven by the same tokens so it themes automatically.
+--------------------------------------------------------------------------- */
+
 .axiom-prose {
-  line-height: 1.65;
+  line-height: 1.68;
+  color: var(--fg);
 }
 .axiom-prose > :first-child {
   margin-top: 0;
@@ -63,28 +317,28 @@ body {
   margin-bottom: 0;
 }
 .axiom-prose p {
-  margin: 0.5em 0;
+  margin: 0.55em 0;
 }
 .axiom-prose h1,
 .axiom-prose h2,
 .axiom-prose h3 {
-  font-weight: 600;
-  color: #f4f4f5;
-  margin: 1em 0 0.4em;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  margin: 1.1em 0 0.45em;
 }
 .axiom-prose h1 {
-  font-size: 1.15em;
+  font-size: 1.2em;
 }
 .axiom-prose h2 {
-  font-size: 1.08em;
+  font-size: 1.1em;
 }
 .axiom-prose h3 {
   font-size: 1.02em;
 }
 .axiom-prose ul,
 .axiom-prose ol {
-  margin: 0.5em 0;
-  padding-left: 1.4em;
+  margin: 0.55em 0;
+  padding-left: 1.45em;
 }
 .axiom-prose ul {
   list-style: disc;
@@ -93,51 +347,66 @@ body {
   list-style: decimal;
 }
 .axiom-prose li {
-  margin: 0.2em 0;
+  margin: 0.25em 0;
+}
+.axiom-prose li::marker {
+  color: var(--violet);
 }
 .axiom-prose strong {
-  color: #f4f4f5;
-  font-weight: 600;
+  font-weight: 650;
 }
 .axiom-prose a {
-  color: #22d3ee;
+  color: var(--cyan);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 .axiom-prose code {
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 4px;
-  padding: 0.15em 0.4em;
-  font-size: 0.85em;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.12em 0.38em;
+  font-size: 0.86em;
   font-family: var(--font-geist-mono), ui-monospace, monospace;
 }
 .axiom-prose pre {
-  background: rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  padding: 0.75em 1em;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.85em 1em;
   overflow-x: auto;
-  margin: 0.6em 0;
+  margin: 0.7em 0;
 }
 .axiom-prose pre code {
   background: none;
+  border: none;
   padding: 0;
 }
 .axiom-prose blockquote {
-  border-left: 2px solid rgba(6, 182, 212, 0.5);
-  padding-left: 0.8em;
-  color: #a1a1aa;
-  margin: 0.5em 0;
+  border-left: 3px solid var(--violet);
+  padding-left: 0.9em;
+  color: var(--fg-muted);
+  margin: 0.6em 0;
 }
 .axiom-prose table {
   width: 100%;
   border-collapse: collapse;
-  margin: 0.6em 0;
-  font-size: 0.9em;
+  margin: 0.7em 0;
+  font-size: 0.92em;
 }
 .axiom-prose th,
 .axiom-prose td {
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  padding: 0.4em 0.6em;
+  border: 1px solid var(--border);
+  padding: 0.45em 0.65em;
   text-align: left;
+}
+.axiom-prose th {
+  background: var(--bg-sunken);
+  font-weight: 600;
+}
+/* Tables are the one element that reliably overflows a chat bubble, so the
+   whole block scrolls inside itself rather than widening the page. */
+.axiom-prose > table,
+.axiom-prose > .table-wrap {
+  display: block;
+  overflow-x: auto;
 }

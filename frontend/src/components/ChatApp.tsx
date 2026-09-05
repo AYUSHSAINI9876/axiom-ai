@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import Sidebar from "./Sidebar";
+import Sidebar, { initialsOf } from "./Sidebar";
 import MessageBubble from "./MessageBubble";
 import StatusIndicator from "./StatusIndicator";
+import ThemeToggle from "./ThemeToggle";
 import { streamChat } from "@/lib/api";
+import { useAuth } from "@/context/AuthProvider";
 import {
   createConversation,
   deleteConversation as removeConversation,
@@ -18,12 +20,36 @@ import {
 import type { Citation, Conversation, Message } from "@/lib/types";
 
 const EXAMPLE_PROMPTS = [
-  "Summarize the key findings in the indexed documents.",
-  "What does the Eyring equation describe?",
-  "Explain the synthesis of catalyst C-104 step by step.",
+  {
+    label: "Summarize the corpus",
+    prompt: "Summarize the key findings in the indexed documents.",
+    accent: "violet",
+    icon: "M4 6h16M4 12h16M4 18h7",
+  },
+  {
+    label: "Explain a concept",
+    prompt: "What does the Eyring equation describe?",
+    accent: "cyan",
+    icon: "M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z",
+  },
+  {
+    label: "Walk through a procedure",
+    prompt: "Explain the synthesis of catalyst C-104 step by step.",
+    accent: "amber",
+    icon: "M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.628.282a2 2 0 01-1.806 0l-.628-.282a6 6 0 00-3.86-.517l-2.387.477a2 2 0 00-1.022.547",
+  },
 ];
 
+const ACCENT_CLASSES: Record<string, string> = {
+  violet: "bg-violet/12 text-violet group-hover:bg-violet/20",
+  cyan: "bg-cyan/12 text-cyan group-hover:bg-cyan/20",
+  amber: "bg-amber/12 text-amber group-hover:bg-amber/20",
+};
+
 export default function ChatApp() {
+  const { user } = useAuth();
+  const userId = user?.id ?? "anonymous";
+
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [input, setInput] = useState("");
@@ -32,6 +58,7 @@ export default function ChatApp() {
   const [documentsVersion, setDocumentsVersion] = useState(0);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -39,7 +66,10 @@ export default function ChatApp() {
     // which is unavailable during SSR. Starting from empty state and loading
     // here keeps the client's first render identical to the server's,
     // avoiding a hydration mismatch; the real data lands on the next render.
-    const stored = sortByRecent(loadConversations());
+    //
+    // Keyed on userId so switching accounts swaps the whole sidebar rather
+    // than showing the previous account's conversations.
+    const stored = sortByRecent(loadConversations(userId));
     if (stored.length > 0) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- see comment above
       setConversations(stored);
@@ -49,28 +79,33 @@ export default function ChatApp() {
       setConversations([fresh]);
       setActiveId(fresh.id);
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     if (conversations.length === 0) return;
-    const timeout = setTimeout(() => saveConversations(conversations), 300);
+    const timeout = setTimeout(() => saveConversations(userId, conversations), 300);
     return () => clearTimeout(timeout);
-  }, [conversations]);
+  }, [conversations, userId]);
 
   const activeConversation = useMemo(
     () => conversations.find((c) => c.id === activeId) ?? null,
     [conversations, activeId]
   );
-  const messages = useMemo(
-    () => activeConversation?.messages ?? [],
-    [activeConversation]
-  );
+  const messages = useMemo(() => activeConversation?.messages ?? [], [activeConversation]);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, isStreaming]);
+
+  // Grow the composer with its content, up to a cap, then scroll inside it.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  }, [input]);
 
   const handleNewChat = () => {
     const fresh = createConversation();
@@ -178,6 +213,15 @@ export default function ChatApp() {
     send(input);
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Enter sends; Shift+Enter inserts a newline. The composer is a textarea
+    // so multi-line questions (pasted equations, code) stay readable.
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      send(input);
+    }
+  };
+
   const handleStop = () => {
     abortRef.current?.abort();
     setIsStreaming(false);
@@ -190,8 +234,11 @@ export default function ChatApp() {
     runQuery(lastUserMessage.content, messages.slice(0, lastUserIndex));
   };
 
+  const initials = initialsOf(user?.name);
+  const firstName = user?.name?.trim().split(/\s+/)[0] ?? "";
+
   return (
-    <div className="flex h-dvh w-full overflow-hidden bg-animate">
+    <div className="flex h-dvh w-full overflow-hidden">
       <Sidebar
         conversations={conversations}
         activeId={activeId}
@@ -203,68 +250,77 @@ export default function ChatApp() {
         onClose={() => setIsSidebarOpen(false)}
       />
 
-      <div className="flex flex-1 flex-col min-w-0">
-        <header className="flex items-center justify-between gap-3 border-b border-white/10 bg-black/20 px-4 py-3 sm:px-6">
-          <div className="flex items-center gap-3 min-w-0">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-2.5 sm:px-6">
+          <div className="flex min-w-0 items-center gap-2">
             <button
               type="button"
-              className="md:hidden text-gray-300 hover:text-white shrink-0"
+              className="focus-ring shrink-0 rounded-lg p-1.5 text-fg-muted transition-colors hover:text-fg md:hidden"
               onClick={() => setIsSidebarOpen(true)}
               aria-label="Open conversation list"
             >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
-            <div className="w-9 h-9 bg-cyan-500 rounded-lg flex items-center justify-center glow shrink-0">
-              <span className="text-white font-bold text-lg">A</span>
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-lg font-bold text-white tracking-tight leading-none truncate">
-                AXIOM AI
-              </h1>
-              <p className="text-[10px] text-cyan-400 font-medium uppercase tracking-widest">
-                Scientific RAG Engine
-              </p>
-            </div>
+            <h1 className="min-w-0 truncate text-sm font-semibold tracking-tight">
+              {activeConversation?.title ?? "New chat"}
+            </h1>
           </div>
-          <StatusIndicator key={documentsVersion} />
+          <div className="flex shrink-0 items-center gap-2">
+            <StatusIndicator key={documentsVersion} />
+            <ThemeToggle />
+          </div>
         </header>
 
         <div
           ref={scrollRef}
-          className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 scrollbar-hide"
+          className="scrollbar-thin flex-1 space-y-5 overflow-y-auto p-4 sm:p-6"
           role="log"
           aria-live="polite"
         >
           {messages.length === 0 && (
-            <div className="h-full flex flex-col items-center justify-center text-center space-y-4">
-              <div className="p-4 bg-white/5 rounded-full">
-                <svg className="w-12 h-12 text-cyan-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.628.282a2 2 0 01-1.806 0l-.628-.282a6 6 0 00-3.86-.517l-2.387.477a2 2 0 00-1.022.547l-.34.34a2 2 0 000 2.828l1.245 1.245a2 2 0 002.828 0L14 14.828a2 2 0 012.828 0L19.428 15.428z"
-                  />
+            <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center text-center">
+              <span className="gradient-brand glow mb-5 flex h-14 w-14 items-center justify-center rounded-2xl">
+                <svg
+                  className="h-7 w-7 text-white"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2.2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M4 20 L12 4 L20 20" />
+                  <path d="M8.2 14.4 H15.8" />
                 </svg>
-              </div>
-              <h2 className="text-xl font-semibold text-white">
-                How can I assist your research today?
+              </span>
+              <h2 className="text-xl font-bold tracking-tight sm:text-2xl">
+                {firstName ? `Hello, ${firstName}.` : "Hello."}{" "}
+                <span className="gradient-text">What are we researching?</span>
               </h2>
-              <p className="text-gray-400 max-w-md">
-                Ask complex questions about your indexed documents, or upload
-                new ones from the sidebar.
+              <p className="mt-2 max-w-md text-sm text-fg-muted">
+                Ask anything about your indexed documents, or add new ones from the
+                sidebar. Answers stream in with citations you can open.
               </p>
-              <div className="flex flex-wrap justify-center gap-2 pt-2 max-w-lg">
-                {EXAMPLE_PROMPTS.map((prompt) => (
+
+              <div className="mt-7 grid w-full gap-2 sm:grid-cols-3">
+                {EXAMPLE_PROMPTS.map((example) => (
                   <button
-                    key={prompt}
+                    key={example.prompt}
                     type="button"
-                    onClick={() => send(prompt)}
-                    className="text-xs text-gray-300 bg-white/5 hover:bg-white/10 border border-white/10 rounded-full px-3 py-1.5 transition-colors"
+                    onClick={() => send(example.prompt)}
+                    className="focus-ring group glass flex flex-col items-start gap-2 rounded-xl p-3 text-left transition-colors hover:border-border-strong"
                   >
-                    {prompt}
+                    <span
+                      className={`flex h-7 w-7 items-center justify-center rounded-lg transition-colors ${ACCENT_CLASSES[example.accent]}`}
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" d={example.icon} />
+                      </svg>
+                    </span>
+                    <span className="text-[12px] font-medium text-fg">{example.label}</span>
+                    <span className="text-[11px] leading-snug text-fg-subtle">{example.prompt}</span>
                   </button>
                 ))}
               </div>
@@ -272,64 +328,83 @@ export default function ChatApp() {
           )}
 
           {messages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
+            <MessageBubble key={message.id} message={message} userInitials={initials} />
           ))}
 
           {isStreaming && messages[messages.length - 1]?.content === "" && (
-            <div className="flex justify-start">
-              <div className="bg-white/5 p-4 rounded-2xl rounded-tl-none border border-white/10 flex gap-1">
-                <div className="w-2 h-2 bg-cyan-500 rounded-full animate-bounce" />
-                <div className="w-2 h-2 bg-cyan-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                <div className="w-2 h-2 bg-cyan-500 rounded-full animate-bounce [animation-delay:-0.3s]" />
+            <div className="flex gap-3">
+              <span className="gradient-brand mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" aria-hidden="true">
+                <svg className="h-4 w-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 20 L12 4 L20 20" />
+                  <path d="M8.2 14.4 H15.8" />
+                </svg>
+              </span>
+              <div className="glass flex items-center gap-1.5 rounded-2xl rounded-tl-sm px-4 py-3.5">
+                <span className="h-2 w-2 animate-bounce rounded-full bg-violet" />
+                <span className="h-2 w-2 animate-bounce rounded-full bg-fuchsia [animation-delay:-0.15s]" />
+                <span className="h-2 w-2 animate-bounce rounded-full bg-cyan [animation-delay:-0.3s]" />
+                <span className="sr-only">Axiom is composing an answer…</span>
               </div>
             </div>
           )}
         </div>
 
-        <form onSubmit={handleSubmit} className="border-t border-white/10 bg-black/20 p-4 sm:p-6">
-          <div className="flex items-center justify-between mb-2 px-1 h-4">
-            {!isStreaming && messages.some((m) => m.role === "user") && (
+        <form onSubmit={handleSubmit} className="border-t border-border px-4 py-3 sm:px-6 sm:py-4">
+          <div className="mx-auto max-w-3xl">
+            <div className="mb-1.5 flex h-5 items-center justify-between px-1">
+              {!isStreaming && messages.some((m) => m.role === "user") && (
+                <button
+                  type="button"
+                  onClick={handleRegenerate}
+                  className="focus-ring flex items-center gap-1.5 rounded text-[11px] text-fg-subtle transition-colors hover:text-violet"
+                >
+                  <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  Regenerate
+                </button>
+              )}
+              {isStreaming && (
+                <button
+                  type="button"
+                  onClick={handleStop}
+                  className="focus-ring ml-auto flex items-center gap-1.5 rounded text-[11px] text-rose transition-opacity hover:opacity-80"
+                >
+                  <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <rect x="6" y="6" width="12" height="12" rx="2" />
+                  </svg>
+                  Stop generating
+                </button>
+              )}
+            </div>
+
+            <div className="glass focus-within:ring-2 focus-within:ring-[color:var(--ring)] relative flex items-end gap-2 rounded-2xl p-2 transition-shadow">
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                rows={1}
+                placeholder="Query the corpus…  (Enter to send, Shift+Enter for a new line)"
+                aria-label="Message"
+                className="scrollbar-thin max-h-50 flex-1 resize-none bg-transparent px-2.5 py-2 text-sm text-fg outline-none placeholder:text-fg-subtle"
+              />
               <button
-                type="button"
-                onClick={handleRegenerate}
-                className="text-[11px] text-gray-400 hover:text-cyan-400 transition-colors"
+                type="submit"
+                disabled={isStreaming || !input.trim()}
+                aria-label="Send message"
+                className="gradient-brand focus-ring flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                Regenerate response
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M12 5l7 7-7 7" />
+                </svg>
               </button>
-            )}
-            {isStreaming && (
-              <button
-                type="button"
-                onClick={handleStop}
-                className="text-[11px] text-red-400 hover:text-red-300 transition-colors ml-auto"
-              >
-                Stop generating
-              </button>
-            )}
+            </div>
+
+            <p className="mt-2 text-center text-[10px] uppercase tracking-widest text-fg-subtle">
+              Hybrid RAG · Dense + BM25 fusion · Answers are grounded in your documents
+            </p>
           </div>
-          <div className="relative flex items-center">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Query the scientific corpus..."
-              aria-label="Message"
-              className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-6 pr-16 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 text-white placeholder-gray-500 transition-all"
-            />
-            <button
-              type="submit"
-              disabled={isStreaming || !input.trim()}
-              aria-label="Send message"
-              className="absolute right-3 p-2 bg-cyan-500 hover:bg-cyan-400 rounded-lg text-white transition-colors disabled:opacity-50"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" />
-              </svg>
-            </button>
-          </div>
-          <p className="mt-3 text-[10px] text-center text-gray-500 uppercase tracking-widest">
-            Powered by Axiom Hybrid RAG • Llama 3 • BGE Embeddings
-          </p>
         </form>
       </div>
     </div>

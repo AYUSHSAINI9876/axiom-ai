@@ -1,6 +1,16 @@
 import type { Conversation } from "./types";
 
-const STORAGE_KEY = "axiom-ai-conversations";
+/**
+ * Conversations are stored per user.
+ *
+ * Two people using the same browser must not see each other's chat history,
+ * and signing out then in as someone else must not inherit the previous
+ * account's sidebar — so the account id is part of the key rather than
+ * something to remember to clear.
+ */
+function storageKey(userId: string): string {
+  return `axiom-ai-conversations:${userId}`;
+}
 
 export function generateId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -9,10 +19,10 @@ export function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-export function loadConversations(): Conversation[] {
+export function loadConversations(userId: string): Conversation[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(storageKey(userId));
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? (parsed as Conversation[]) : [];
@@ -21,10 +31,10 @@ export function loadConversations(): Conversation[] {
   }
 }
 
-export function saveConversations(conversations: Conversation[]): void {
+export function saveConversations(userId: string, conversations: Conversation[]): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
+    window.localStorage.setItem(storageKey(userId), JSON.stringify(conversations));
   } catch {
     // localStorage can throw (quota exceeded, private browsing). Losing
     // persistence is an acceptable degradation; the session keeps working.

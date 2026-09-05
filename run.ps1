@@ -46,6 +46,25 @@ else {
     }
 }
 
+# --- Auth signing key ---
+# Without JWT_SECRET the gateway mints a random one per start, which silently
+# signs everyone out on every restart. Generating one into .env here makes local
+# sessions survive `docker compose restart`, and keeps the secret out of git.
+if (-not (Test-Path ".env")) {
+    Copy-Item ".env.example" ".env"
+    Write-Host "Created .env from .env.example." -ForegroundColor DarkGray
+}
+
+$envText = Get-Content ".env" -Raw
+if ($envText -match '(?m)^\s*JWT_SECRET\s*=\s*$') {
+    $bytes = New-Object byte[] 32
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    $secret = [Convert]::ToBase64String($bytes)
+    $envText = $envText -replace '(?m)^\s*JWT_SECRET\s*=\s*$', "JWT_SECRET=$secret"
+    Set-Content ".env" $envText -NoNewline -Encoding utf8
+    Write-Host "Generated a JWT_SECRET in .env so sessions survive restarts." -ForegroundColor Green
+}
+
 Write-Host ""
 Write-Host "Starting Axiom AI..." -ForegroundColor Cyan
 Write-Host "First boot downloads the embedding model (~1.3GB) and may take several minutes." -ForegroundColor DarkGray

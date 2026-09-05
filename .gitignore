@@ -38,6 +38,10 @@ yarn-error.log*
 gateway/main
 gateway/main.exe
 gateway/gateway
+gateway/axiom-gateway
+gateway/axiom-gateway.exe
+# The gateway's fallback auth store, written only when DATABASE_URL is unset.
+gateway/*.db
 *.test
 *.out
 

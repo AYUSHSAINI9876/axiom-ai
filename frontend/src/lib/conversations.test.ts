@@ -33,18 +33,34 @@ describe("titleFromMessage", () => {
 });
 
 describe("conversation store", () => {
+  const USER = "usr_alice";
+
   it("round-trips through localStorage", () => {
     const conversation = createConversation();
-    saveConversations([conversation]);
-    const loaded = loadConversations();
+    saveConversations(USER, [conversation]);
+    const loaded = loadConversations(USER);
     expect(loaded).toHaveLength(1);
     expect(loaded[0].id).toBe(conversation.id);
   });
 
   it("returns an empty array when storage is empty or corrupt", () => {
-    expect(loadConversations()).toEqual([]);
-    window.localStorage.setItem("axiom-ai-conversations", "not json");
-    expect(loadConversations()).toEqual([]);
+    expect(loadConversations(USER)).toEqual([]);
+    window.localStorage.setItem(`axiom-ai-conversations:${USER}`, "not json");
+    expect(loadConversations(USER)).toEqual([]);
+  });
+
+  // Two accounts on one browser must not see each other's chat history, and
+  // signing out then in as someone else must not inherit the previous
+  // account's sidebar.
+  it("keeps each user's conversations separate", () => {
+    const alices = createConversation();
+    const bobs = createConversation();
+    saveConversations("usr_alice", [alices]);
+    saveConversations("usr_bob", [bobs]);
+
+    expect(loadConversations("usr_alice").map((c) => c.id)).toEqual([alices.id]);
+    expect(loadConversations("usr_bob").map((c) => c.id)).toEqual([bobs.id]);
+    expect(loadConversations("usr_carol")).toEqual([]);
   });
 
   it("upserts new conversations at the front and updates existing ones in place", () => {
