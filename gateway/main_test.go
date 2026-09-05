@@ -301,3 +301,33 @@ func TestGatewaySharedSecretIsAttachedAndNotSpoofable(t *testing.T) {
 		t.Fatalf("expected the configured shared secret downstream, got %q", seen)
 	}
 }
+
+// The proxy rewrites URL.Path to strip the /api prefix. URL.RawPath still holds
+// the *original* escaped path, so a document name containing characters that
+// need escaping (a space, a '#') only survives if the rewrite leaves the two
+// consistent. DELETE /api/documents/{name} is the route that exercises this.
+func TestProxyPreservesEncodedPathSegments(t *testing.T) {
+	var seenPath string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	gateway, store := newTestGateway(t, backend.URL)
+
+	// "lab notes #2.pdf" — a space and a fragment character, both of which the
+	// browser percent-encodes and a naive rewrite would mangle or truncate.
+	const name = "lab notes %232.pdf"
+	req := authedRequest(t, store, http.MethodDelete, gateway.URL+"/api/documents/"+name, "")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if want := "/documents/lab notes #2.pdf"; seenPath != want {
+		t.Fatalf("expected the ML service to receive %q, got %q", want, seenPath)
+	}
+}

@@ -17,7 +17,12 @@ python-dotenv==1.2.2
 
 # LlamaIndex — packages this service imports directly
 llama-index-core==0.14.23
-llama-index-embeddings-fastembed==0.5.1
+# The integration package declares only llama-index-core as a dependency — it
+# does not pull in fastembed itself, so the image would build and then fail on
+# the first embedding call. fastembed is pinned explicitly for that reason; it
+# is what brings onnxruntime.
+llama-index-embeddings-fastembed==0.7.0
+fastembed==0.8.0
 llama-index-vector-stores-qdrant==0.10.2
 llama-index-llms-ollama==0.10.1
 llama-index-llms-groq==0.5.0

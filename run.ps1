@@ -57,11 +57,24 @@ if (-not (Test-Path ".env")) {
 
 $envText = Get-Content ".env" -Raw
 if ($envText -match '(?m)^\s*JWT_SECRET\s*=\s*$') {
+    # RNGCryptoServiceProvider rather than RandomNumberGenerator::Fill: this
+    # script runs under Windows PowerShell 5.1 on .NET Framework, where Fill()
+    # (a .NET Core addition) does not exist.
     $bytes = New-Object byte[] 32
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    $rng = New-Object System.Security.Cryptography.RNGCryptoServiceProvider
+    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+
+    # Base64 can contain '+' and '/', which are fine in a .env value, but the
+    # replacement string is regex-expanded, so '$' sequences would be eaten.
     $secret = [Convert]::ToBase64String($bytes)
-    $envText = $envText -replace '(?m)^\s*JWT_SECRET\s*=\s*$', "JWT_SECRET=$secret"
-    Set-Content ".env" $envText -NoNewline -Encoding utf8
+    $envText = [System.Text.RegularExpressions.Regex]::Replace(
+        $envText, '(?m)^\s*JWT_SECRET\s*=\s*$', "JWT_SECRET=$secret".Replace('$', '$$'))
+
+    # WriteAllText with an explicit BOM-less encoder: Set-Content -Encoding utf8
+    # emits a BOM on PowerShell 5.1, and a BOM on the first line of .env trips
+    # up docker compose's parser.
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText((Join-Path $PWD ".env"), $envText, $utf8NoBom)
     Write-Host "Generated a JWT_SECRET in .env so sessions survive restarts." -ForegroundColor Green
 }
 

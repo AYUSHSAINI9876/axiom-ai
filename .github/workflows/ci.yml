@@ -198,13 +198,18 @@ jobs:
       # Asserts the property that makes this image deployable: it imports and
       # serves without torch present. If a dependency quietly pulled torch back
       # in, the image would still work but no longer fit its memory budget.
-      - name: Verify the lite image runs without torch
+      - name: Verify the lite image runs on ONNX, without torch
         run: |
           docker run --rm -e AXIOM_SKIP_MODEL_INIT=1 axiom-ml-service:lite python -c "
           import importlib.util, main
           assert importlib.util.find_spec('torch') is None, 'torch leaked into the lite image'
-          import fastembed
-          print('lite image ok — fastembed present, torch absent')
+          # llama-index-embeddings-fastembed declares only llama-index-core as a
+          # dependency, so fastembed itself has to be pinned separately. Import
+          # both: without this the image builds cleanly and then fails on the
+          # first embedding call at runtime.
+          import fastembed, onnxruntime
+          from llama_index.embeddings.fastembed import FastEmbedEmbedding
+          print('lite image ok - fastembed + onnxruntime present, torch absent')
           "
 
   compose:
