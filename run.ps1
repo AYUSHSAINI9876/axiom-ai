@@ -52,7 +52,7 @@ else {
     else {
         Write-Host "Ollama does not appear to be running." -ForegroundColor Yellow
         Write-Host "  Install it from https://ollama.ai/ then run:  ollama pull llama3"
-        Write-Host "  (Or set GROQ_API_KEY in .env to use hosted Llama 3 instead.)"
+        Write-Host "  (Or set GROQ_API_KEY in .env to use a hosted model instead.)"
         Write-Host "Continuing anyway - the UI will start, but answers will fail until a backend is up."
     }
 }

@@ -41,7 +41,7 @@ export default function StatusIndicator() {
 
   const detail =
     state === "online"
-      ? `${docs} document${docs === 1 ? "" : "s"} indexed · ${health?.llmModel ?? "Llama 3"} via ${backend} · ${health?.embeddingModel ?? "BGE"} embeddings`
+      ? `${docs} document${docs === 1 ? "" : "s"} indexed · ${health?.llmModel ?? "model"} via ${backend} · ${health?.embeddingModel ?? "BGE"} embeddings`
       : label;
 
   const dotColor =

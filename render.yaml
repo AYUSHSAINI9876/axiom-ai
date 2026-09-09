@@ -9,7 +9,7 @@
 # accounts outside this repo:
 #   QDRANT_URL / QDRANT_API_KEY  — a Qdrant Cloud cluster (the free tier is
 #                                  ample; Render has no managed vector store)
-#   GROQ_API_KEY                 — hosted Llama 3. Required here: Ollama is a
+#   GROQ_API_KEY                 — hosted generation. Required here: Ollama is a
 #                                  local-only fallback and cannot be reached
 #                                  from a managed host.
 

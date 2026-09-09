@@ -77,15 +77,42 @@ app = FastAPI(title="Axiom ML Service", dependencies=[Depends(require_gateway)])
 # forward both headers to the browser, which rejects responses with
 # duplicate/conflicting CORS headers.
 
-QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+def env(name: str, fallback: str) -> str:
+    """Read an env var, treating an empty value as unset.
+
+    os.getenv(name, fallback) only applies the fallback when the variable is
+    absent, so a `.env` line like `EMBED_BACKEND=` yields "" and silently
+    defeats the default. Every key in .env.example ships blank precisely so it
+    can be filled in, and docker compose's own `${VAR:-default}` already treats
+    empty as unset — this keeps the Python side agreeing with both.
+    """
+    return os.getenv(name) or fallback
+
+
+QDRANT_URL = env("QDRANT_URL", "http://localhost:6333")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY") or None
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-DATA_DIR = os.getenv("DATA_DIR", "./data/docs")
-PERSIST_DIR = os.getenv("PERSIST_DIR", "./storage")
+OLLAMA_BASE_URL = env("OLLAMA_BASE_URL", "http://localhost:11434")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY") or None
+DATA_DIR = env("DATA_DIR", "./data/docs")
+PERSIST_DIR = env("PERSIST_DIR", "./storage")
 
 LLM_BACKEND = "groq" if GROQ_API_KEY else "ollama"
-LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile" if GROQ_API_KEY else "llama3")
+
+
+def default_llm_model(backend: str) -> str:
+    """The model to ask for when LLM_MODEL is not set.
+
+    Groq retired its hosted Llama models, so a "llama-3.x" id 404s there on a
+    current account — which presented as every chat failing despite a valid key.
+    gpt-oss-120b is the strongest general model Groq still serves, with a 131k
+    context window that suits stuffing retrieved chunks into the prompt.
+
+    Ollama's default stays llama3: that one is pulled locally and still valid.
+    """
+    return "openai/gpt-oss-120b" if backend == "groq" else "llama3"
+
+
+LLM_MODEL = env("LLM_MODEL", default_llm_model(LLM_BACKEND))
 
 # Two embedding backends, because the best local model is too heavy to deploy:
 #
@@ -99,11 +126,11 @@ LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile" if GROQ_API_KEY els
 #
 # This module default stays huggingface so a bare `python main.py` gets the
 # better model; compose and Render set EMBED_BACKEND=fastembed explicitly.
-EMBED_BACKEND = os.getenv("EMBED_BACKEND", "huggingface").lower()
+EMBED_BACKEND = env("EMBED_BACKEND", "huggingface").lower()
 if EMBED_BACKEND == "fastembed":
-    EMBED_MODEL_NAME = os.getenv("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
+    EMBED_MODEL_NAME = env("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
 else:
-    EMBED_MODEL_NAME = os.getenv("EMBED_MODEL", "BAAI/bge-large-en-v1.5")
+    EMBED_MODEL_NAME = env("EMBED_MODEL", "BAAI/bge-large-en-v1.5")
 
 
 def _collection_name() -> str:

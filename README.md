@@ -27,7 +27,7 @@ flowchart LR
     G -->|proxy /api/* + X-Axiom-User-Id| M[ML Service<br/>FastAPI :8000]
     M -->|dense vectors, filtered by user| Q[(Qdrant<br/>HNSW :6333)]
     M -->|BM25 over the user's nodes| D[(Local docstore<br/>persisted)]
-    M -->|generation| L[Llama 3<br/>Ollama or Groq]
+    M -->|generation| L[LLM<br/>Ollama or Groq]
 ```
 
 The browser only ever talks to the gateway — a single origin, so CORS is configured in
@@ -52,7 +52,8 @@ caller's identity stamped on the request.
 - Docker & Docker Compose
 - An LLM backend — either:
   - **Ollama** (local, default): [install](https://ollama.ai/), then `ollama pull llama3`
-  - **Groq** (hosted): set `GROQ_API_KEY` — takes precedence when present
+  - **Groq** (hosted): set `GROQ_API_KEY` — takes precedence when present, and is the
+    easier option on a low-memory machine since nothing is loaded locally
 
 ### Run
 
@@ -192,8 +193,8 @@ All variables are optional; the defaults below are what `docker compose` uses.
 | `EMBED_BACKEND` | `huggingface` | Compose and Render set `fastembed` (ONNX, no torch) |
 | `EMBED_MODEL` | `BAAI/bge-large-en-v1.5` | `BAAI/bge-small-en-v1.5` under `fastembed` |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Used when `GROQ_API_KEY` is unset |
-| `GROQ_API_KEY` | *(unset)* | If set, uses Groq-hosted Llama 3 instead of Ollama |
-| `LLM_MODEL` | `llama3` / `llama-3.3-70b-versatile` | Depends on the backend. Use `llama3.2:3b` on a small machine. |
+| `GROQ_API_KEY` | *(unset)* | If set, uses a Groq-hosted model instead of Ollama |
+| `LLM_MODEL` | `llama3` / `openai/gpt-oss-120b` | Depends on the backend. Use `llama3.2:3b` on a small machine. Groq no longer serves Llama models. |
 | `GATEWAY_SHARED_SECRET` | *(unset)* | When set, rejects any request without the matching key |
 | `DATA_DIR` | `./data/docs` | Corpus root; each user gets a subdirectory |
 | `PERSIST_DIR` | `./storage` | Docstore/index metadata (survives restarts) |

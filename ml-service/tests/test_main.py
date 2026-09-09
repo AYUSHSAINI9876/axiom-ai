@@ -1,3 +1,4 @@
+import os
 import pytest
 import qdrant_client
 from fastapi.testclient import TestClient
@@ -389,3 +390,61 @@ def test_both_chat_paths_report_the_actionable_message(client, monkeypatch):
     assert "smaller model" in streamed or "GROQ_API_KEY" in streamed
     # The raw allocation dump must not reach the chat bubble.
     assert "ggml_backend_cpu_buffer_type_alloc_buffer" not in streamed
+
+
+def test_the_groq_default_model_is_not_a_retired_llama_id():
+    """Groq stopped serving Llama models.
+
+    The previous default, `llama-3.3-70b-versatile`, 404s on a current account —
+    so every chat request failed with "model does not exist" even though the key
+    was valid. Asserting the shape rather than one exact id keeps this
+    meaningful if the chosen model changes again.
+    """
+    groq_default = main.default_llm_model("groq")
+    assert not groq_default.startswith("llama-"), (
+        f"{groq_default!r} looks like a retired Groq Llama id"
+    )
+    assert "/" in groq_default, "expected a vendor-prefixed Groq model id"
+
+    # Ollama is unaffected - llama3 is pulled locally and still valid there.
+    assert main.default_llm_model("ollama") == "llama3"
+
+
+def test_an_explicit_llm_model_overrides_the_default(monkeypatch):
+    """LLM_MODEL is how a low-memory machine selects a smaller local model."""
+    monkeypatch.setenv("LLM_MODEL", "llama3.2:3b")
+    assert os.getenv("LLM_MODEL") == "llama3.2:3b"
+    # The module resolves `os.getenv("LLM_MODEL") or default_llm_model(...)`,
+    # so a set value always wins over either default.
+    assert (os.getenv("LLM_MODEL") or main.default_llm_model("groq")) == "llama3.2:3b"
+
+
+def test_blank_env_values_fall_back_to_defaults(monkeypatch):
+    """`.env.example` ships every key blank so it can be filled in.
+
+    os.getenv(name, fallback) returns "" for a blank line rather than the
+    fallback, which silently produced embed_backend="" and would have picked the
+    wrong embedding path. docker compose's `${VAR:-default}` already treats
+    blank as unset; env() makes Python agree.
+    """
+    monkeypatch.setenv("EMBED_BACKEND", "")
+    monkeypatch.setenv("LLM_MODEL", "")
+    monkeypatch.setenv("QDRANT_URL", "")
+
+    assert main.env("EMBED_BACKEND", "huggingface") == "huggingface"
+    assert main.env("LLM_MODEL", "llama3") == "llama3"
+    assert main.env("QDRANT_URL", "http://localhost:6333") == "http://localhost:6333"
+
+    # A real value still wins.
+    monkeypatch.setenv("EMBED_BACKEND", "fastembed")
+    assert main.env("EMBED_BACKEND", "huggingface") == "fastembed"
+
+
+def test_health_never_reports_a_blank_backend(client):
+    """The status pill renders whatever /health returns, so a blank string
+    would surface in the UI as a missing backend name."""
+    body = client.get("/health", headers=ALICE).json()
+    assert body["embed_backend"], "embed_backend must not be blank"
+    assert body["llm_backend"], "llm_backend must not be blank"
+    assert body["llm_model"], "llm_model must not be blank"
+    assert body["embedding_model"], "embedding_model must not be blank"

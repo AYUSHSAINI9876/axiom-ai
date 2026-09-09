@@ -48,7 +48,7 @@ services:
       # Which model Ollama is asked for. llama3 needs ~4GB of free RAM to load;
       # set LLM_MODEL=llama3.2:3b in .env on a smaller machine.
       - LLM_MODEL=${LLM_MODEL:-llama3}
-      # Optional: set GROQ_API_KEY in a local .env to use hosted Llama 3
+      # Optional: set GROQ_API_KEY in a local .env to use a hosted model
       # instead of local Ollama. Empty means "fall back to Ollama".
       - GROQ_API_KEY=${GROQ_API_KEY:-}
     depends_on:

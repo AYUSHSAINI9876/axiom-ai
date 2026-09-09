@@ -136,7 +136,7 @@ export default function AuthScreen() {
         </div>
 
         <p className="relative z-10 text-[11px] text-white/60">
-          Go gateway · FastAPI + LlamaIndex · Qdrant · Llama 3
+          Go gateway · FastAPI + LlamaIndex · Qdrant · Groq / Ollama
         </p>
       </section>
 
