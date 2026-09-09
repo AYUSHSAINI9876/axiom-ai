@@ -201,7 +201,6 @@ func newRouter(store Store) (*gin.Engine, error) {
 	{
 		auth.POST("/register", limiter.middleware(), handler.register)
 		auth.POST("/login", limiter.middleware(), handler.login)
-		auth.POST("/demo", limiter.middleware(), handler.demo)
 		// Refresh is not rate limited by the credential bucket: a legitimate
 		// client refreshes on a timer, and the token itself is unguessable.
 		auth.POST("/refresh", handler.refresh)

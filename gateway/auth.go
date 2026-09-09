@@ -4,7 +4,6 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -186,31 +185,6 @@ func (h *authHandler) me(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"user": toPublicUser(user)})
-}
-
-// demo signs the caller into a shared, pre-seeded account so the deployed site
-// can be tried without registering. Its corpus is scoped like any other user's.
-func (h *authHandler) demo(c *gin.Context) {
-	const (
-		demoEmail = "demo@axiom.ai"
-		demoName  = "Demo Explorer"
-	)
-	password := os.Getenv("DEMO_ACCOUNT_PASSWORD")
-	if password == "" {
-		password = "axiom-demo-8842"
-	}
-
-	user, err := h.store.UserByEmail(c.Request.Context(), demoEmail)
-	if errors.Is(err, ErrUserNotFound) {
-		user, err = h.store.CreateUser(c.Request.Context(), demoEmail, demoName, password)
-	}
-	if err != nil {
-		log.Printf("demo sign-in failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "the demo account is unavailable"})
-		return
-	}
-
-	h.issueSession(c, user)
 }
 
 // requireAuth rejects requests without a valid access token and stamps the

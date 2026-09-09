@@ -352,27 +352,6 @@ func TestTokenSignedWithAnotherSecretIsRejected(t *testing.T) {
 	}
 }
 
-func TestDemoSignInWorksAndIsIdempotent(t *testing.T) {
-	gateway, _ := newTestGateway(t, "http://127.0.0.1:1")
-
-	first, firstBody := postJSON(t, gateway.URL+"/auth/demo", map[string]string{})
-	if first.StatusCode != http.StatusOK {
-		t.Fatalf("expected the demo sign-in to succeed, got %d: %v", first.StatusCode, firstBody)
-	}
-
-	// A second call must reuse the account rather than fail on the unique email.
-	second, secondBody := postJSON(t, gateway.URL+"/auth/demo", map[string]string{})
-	if second.StatusCode != http.StatusOK {
-		t.Fatalf("expected a repeat demo sign-in to succeed, got %d: %v", second.StatusCode, secondBody)
-	}
-
-	firstUser := firstBody["user"].(map[string]any)
-	secondUser := secondBody["user"].(map[string]any)
-	if firstUser["id"] != secondUser["id"] {
-		t.Fatal("repeat demo sign-ins created different accounts")
-	}
-}
-
 func TestRateLimiterBlocksAfterTheConfiguredNumberOfAttempts(t *testing.T) {
 	rl := newRateLimiter(3, time.Minute)
 
@@ -408,5 +387,21 @@ func TestBearerToken(t *testing.T) {
 		if got := bearerToken(header); got != want {
 			t.Errorf("bearerToken(%q) = %q, want %q", header, got, want)
 		}
+	}
+}
+
+// The demo/guest shortcut was removed deliberately: the only way in is a real
+// account. A route that mints a session without credentials would undo the rest
+// of the auth layer, so this asserts it is gone rather than merely unused.
+func TestNoCredentialFreeSignInRoutesExist(t *testing.T) {
+	gateway, _ := newTestGateway(t, "http://127.0.0.1:1")
+
+	for _, path := range []string{"/auth/demo", "/auth/guest", "/auth/admin", "/auth/anonymous"} {
+		t.Run(path, func(t *testing.T) {
+			resp, _ := postJSON(t, gateway.URL+path, map[string]string{})
+			if resp.StatusCode != http.StatusNotFound {
+				t.Fatalf("expected %s to be absent (404), got %d", path, resp.StatusCode)
+			}
+		})
 	}
 }

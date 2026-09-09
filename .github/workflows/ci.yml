@@ -221,6 +221,25 @@ jobs:
       - name: Validate docker-compose.yml
         run: docker compose config --quiet
 
+      - name: Validate the full-stack override
+        run: docker compose -f docker-compose.yml -f docker-compose.full.yml config --quiet
+
+      # The default local stack must stay the ONNX one. Switching it back to the
+      # torch image would make `docker compose up` need several GB of RAM again,
+      # which is the difference between the app starting and appearing dead.
+      - name: Verify compose defaults to the lightweight ML image
+        run: |
+          python -c "
+          import subprocess, yaml
+          spec = yaml.safe_load(subprocess.run(
+              ['docker','compose','config'], capture_output=True, text=True, check=True).stdout)
+          build = spec['services']['ml-service']['build']
+          assert build['dockerfile'].endswith('Dockerfile.lite'), build
+          env = spec['services']['ml-service']['environment']
+          assert env.get('EMBED_BACKEND') == 'fastembed', env
+          print('compose default is the ONNX image')
+          "
+
       - name: Validate render.yaml
         run: |
           python -c "
@@ -234,6 +253,9 @@ jobs:
           assert services['axiom-ml-service']['dockerfilePath'].endswith('Dockerfile.lite')
           gateway_keys = {e['key'] for e in services['axiom-gateway']['envVars']}
           assert {'DATABASE_URL', 'JWT_SECRET', 'ML_SERVICE_URL', 'GATEWAY_SHARED_SECRET'} <= gateway_keys
+          # A credential-free sign-in would undo the auth layer; make sure no
+          # deployment env var quietly reintroduces one.
+          assert not any('DEMO' in k for k in gateway_keys), gateway_keys
           print('render.yaml ok')
           "
 
@@ -306,5 +328,11 @@ jobs:
           echo "--- replaying the consumed token is refused ---"
           code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8080/auth/refresh             -H 'Content-Type: application/json' -d "{\"refresh_token\":\"$refresh\"}")
           [ "$code" = "401" ] || { echo "expected 401 on replay, got $code"; exit 1; }
+
+          echo "--- credential-free sign-in routes do not exist ---"
+          for route in demo guest admin anonymous; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://localhost:8080/auth/$route"               -H 'Content-Type: application/json' -d '{}')
+            [ "$code" = "404" ] || { echo "/auth/$route should not exist, got $code"; exit 1; }
+          done
 
           echo "all auth flows behaved correctly against Postgres"

@@ -308,3 +308,84 @@ def test_a_new_account_can_chat_immediately_against_the_starter_corpus(client):
     )
     assert resp.status_code == 200
     assert any("CINNABAR-THREE" in n["text"] for n in resp.json()["source_nodes"])
+
+
+# ---------------------------------------------------------------------------
+# Backend failure messages
+# ---------------------------------------------------------------------------
+
+
+def test_backend_failures_name_the_thing_to_fix(monkeypatch):
+    """Generation errors land in the chat bubble, so the raw driver text is what
+    the reader sees. Each of these is a real local failure mode."""
+    monkeypatch.setattr(main, "LLM_BACKEND", "ollama")
+    monkeypatch.setattr(main, "LLM_MODEL", "llama3")
+
+    unreachable = main.describe_backend_failure(ConnectionError("connection refused"))
+    assert "ollama serve" in unreachable.lower()
+    assert main.OLLAMA_BASE_URL in unreachable
+
+    missing = main.describe_backend_failure(Exception("model 'llama3' not found, try pulling it"))
+    assert "ollama pull llama3" in missing
+
+    # The exact failure seen on an 8GB machine: llama3 needs ~4GB to load.
+    oom = main.describe_backend_failure(
+        Exception("ggml_backend_cpu_buffer_type_alloc_buffer: failed to allocate buffer of size 3925868544")
+    )
+    assert "memory" in oom.lower()
+    assert "llama3.2:3b" in oom or "GROQ_API_KEY" in oom
+
+
+def test_groq_key_failures_are_named(monkeypatch):
+    monkeypatch.setattr(main, "LLM_BACKEND", "groq")
+    message = main.describe_backend_failure(Exception("401 invalid api key"))
+    assert "GROQ_API_KEY" in message
+
+
+def test_unknown_failures_still_surface_their_detail(monkeypatch):
+    monkeypatch.setattr(main, "LLM_BACKEND", "ollama")
+    message = main.describe_backend_failure(Exception("something entirely unexpected"))
+    assert "something entirely unexpected" in message
+
+
+class _ExplodingEngine:
+    """Stands in for a query engine whose LLM cannot be reached."""
+
+    def __init__(self, exc: Exception):
+        self._exc = exc
+
+    def update_prompts(self, _prompts):  # apply_prompt() calls this
+        pass
+
+    def query(self, _query):
+        raise self._exc
+
+
+def test_both_chat_paths_report_the_actionable_message(client, monkeypatch):
+    """The streaming path is the one users actually hit.
+
+    It was previously yielding str(exc) directly while /chat had been updated,
+    so the browser showed a raw ggml allocation dump. Testing the helper alone
+    did not catch that — this asserts the endpoints route through it.
+    """
+    monkeypatch.setattr(main, "LLM_BACKEND", "ollama")
+    monkeypatch.setattr(main, "LLM_MODEL", "llama3")
+    oom = Exception(
+        "llama-server process has terminated: exit status 1: "
+        "ggml_backend_cpu_buffer_type_alloc_buffer: failed to allocate buffer of size 3925868544"
+    )
+    monkeypatch.setattr(main, "build_hybrid_query_engine", lambda *a, **k: _ExplodingEngine(oom))
+
+    client.post("/upload", files={"file": ("doc.txt", b"Some indexed content.", "text/plain")}, headers=ALICE)
+
+    non_streaming = client.post("/chat", json={"query": "anything"}, headers=ALICE)
+    assert non_streaming.status_code == 502
+    assert "smaller model" in non_streaming.json()["detail"]
+
+    with client.stream("POST", "/chat/stream", json={"query": "anything"}, headers=ALICE) as resp:
+        streamed = "".join(resp.iter_text())
+
+    assert '"type": "error"' in streamed
+    assert "smaller model" in streamed or "GROQ_API_KEY" in streamed
+    # The raw allocation dump must not reach the chat bubble.
+    assert "ggml_backend_cpu_buffer_type_alloc_buffer" not in streamed

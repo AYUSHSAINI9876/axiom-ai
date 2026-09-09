@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useAuth } from "@/context/AuthProvider";
 import { useToast } from "@/context/ToastProvider";
+import BackendStatus from "./BackendStatus";
 import Logo from "./Logo";
 import ThemeToggle from "./ThemeToggle";
 
@@ -30,7 +31,7 @@ const HIGHLIGHTS = [
 ];
 
 export default function AuthScreen() {
-  const { signIn, signUp, signInAsDemo } = useAuth();
+  const { signIn, signUp } = useAuth();
   const { notify } = useToast();
 
   const [mode, setMode] = useState<Mode>("signin");
@@ -39,7 +40,7 @@ export default function AuthScreen() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"form" | "demo" | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const isSignUp = mode === "signup";
 
@@ -53,7 +54,7 @@ export default function AuthScreen() {
     if (busy) return;
 
     setError(null);
-    setBusy("form");
+    setBusy(true);
     try {
       if (isSignUp) {
         await signUp(email, name, password);
@@ -65,21 +66,7 @@ export default function AuthScreen() {
     } catch (err) {
       setError((err as Error).message);
     } finally {
-      setBusy(null);
-    }
-  };
-
-  const handleDemo = async () => {
-    if (busy) return;
-    setError(null);
-    setBusy("demo");
-    try {
-      await signInAsDemo();
-      notify("Signed in to the demo account.", "success");
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(null);
+      setBusy(false);
     }
   };
 
@@ -173,7 +160,11 @@ export default function AuthScreen() {
               : "Sign in to reach your indexed corpus."}
           </p>
 
-          <form onSubmit={handleSubmit} className="mt-8 flex flex-col gap-4" noValidate>
+          <div className="mt-6">
+            <BackendStatus />
+          </div>
+
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
             {isSignUp && (
               <Field
                 id="name"
@@ -262,29 +253,19 @@ export default function AuthScreen() {
 
             <button
               type="submit"
-              disabled={busy !== null}
+              disabled={busy}
               className="gradient-brand focus-ring mt-1 flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow-lg transition-opacity hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {busy === "form" && <Spinner />}
-              {isSignUp ? "Create account" : "Sign in"}
+              {busy && <Spinner />}
+              {busy
+                ? isSignUp
+                  ? "Creating account…"
+                  : "Signing in…"
+                : isSignUp
+                  ? "Create account"
+                  : "Sign in"}
             </button>
           </form>
-
-          <div className="my-6 flex items-center gap-3">
-            <span className="h-px flex-1 bg-border" />
-            <span className="text-[11px] uppercase tracking-widest text-fg-subtle">or</span>
-            <span className="h-px flex-1 bg-border" />
-          </div>
-
-          <button
-            type="button"
-            onClick={handleDemo}
-            disabled={busy !== null}
-            className="focus-ring flex items-center justify-center gap-2 rounded-xl border border-border bg-bg-elevated px-4 py-2.5 text-sm font-medium text-fg transition-colors hover:border-border-strong disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {busy === "demo" && <Spinner />}
-            Try the demo account
-          </button>
 
           <p className="mt-8 text-center text-sm text-fg-muted">
             {isSignUp ? "Already have an account?" : "No account yet?"}{" "}

@@ -40,10 +40,6 @@ export function login(email: string, password: string): Promise<StoredSession> {
   return postAuth("login", { email, password });
 }
 
-export function loginAsDemo(): Promise<StoredSession> {
-  return postAuth("demo", {});
-}
-
 export function refreshSession(refreshToken: string): Promise<StoredSession> {
   return postAuth("refresh", { refresh_token: refreshToken });
 }

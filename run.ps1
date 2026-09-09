@@ -37,6 +37,17 @@ if ($groqKey) {
 else {
     if (Get-Process ollama -ErrorAction SilentlyContinue) {
         Write-Host "LLM backend: Ollama (running)." -ForegroundColor Green
+
+        # llama3 needs roughly 4GB of free memory to load. Saying so now beats
+        # a failed answer later, which is the point at which it looks broken.
+        $os = Get-CimInstance Win32_OperatingSystem
+        $freeGB = [math]::Round($os.FreePhysicalMemory / 1MB, 1)
+        if ($freeGB -lt 4.5) {
+            Write-Host "  Only ${freeGB}GB of RAM is free; llama3 needs about 4GB to load." -ForegroundColor Yellow
+            Write-Host "  Either close some apps, or use a smaller model:" -ForegroundColor Yellow
+            Write-Host "      ollama pull llama3.2:3b   then set  LLM_MODEL=llama3.2:3b  in .env"
+            Write-Host "  Or set GROQ_API_KEY in .env to offload generation entirely."
+        }
     }
     else {
         Write-Host "Ollama does not appear to be running." -ForegroundColor Yellow
@@ -80,7 +91,7 @@ if ($envText -match '(?m)^\s*JWT_SECRET\s*=\s*$') {
 
 Write-Host ""
 Write-Host "Starting Axiom AI..." -ForegroundColor Cyan
-Write-Host "First boot downloads the embedding model (~1.3GB) and may take several minutes." -ForegroundColor DarkGray
+Write-Host "First boot builds the images and downloads a ~130MB embedding model." -ForegroundColor DarkGray
 Write-Host "UI will be available at http://localhost:3000" -ForegroundColor Cyan
 Write-Host ""
 

@@ -1,0 +1,17 @@
+# Higher-quality local stack: sentence-transformers with BAAI/bge-large-en-v1.5
+# (1024-dim) instead of the default quantized ONNX bge-small (384-dim).
+#
+# Retrieval is better; the cost is a ~4GB image, a 1.3GB model download on first
+# boot, and a couple of GB of resident memory. Use it when the machine has room:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.full.yml up --build
+services:
+  ml-service:
+    build:
+      dockerfile: Dockerfile
+    environment:
+      - EMBED_BACKEND=huggingface
+      - EMBED_MODEL=BAAI/bge-large-en-v1.5
+    healthcheck:
+      # First boot downloads the weights before the service answers.
+      start_period: 900s

@@ -11,7 +11,6 @@ vi.mock("@/lib/auth", async (importOriginal) => {
     ...actual,
     login: vi.fn(),
     register: vi.fn(),
-    loginAsDemo: vi.fn(),
     logout: vi.fn(),
     refreshSession: vi.fn(),
   };
@@ -31,7 +30,6 @@ beforeEach(() => {
   window.localStorage.clear();
   vi.mocked(auth.login).mockReset();
   vi.mocked(auth.register).mockReset();
-  vi.mocked(auth.loginAsDemo).mockReset();
 });
 
 describe("authentication gate", () => {
@@ -74,7 +72,10 @@ describe("authentication gate", () => {
     await user.type(screen.getByLabelText(/^password$/i), "wrong-password");
     await user.click(screen.getByRole("button", { name: /^sign in$/i }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("incorrect email or password");
+    // The backend-status banner is also role="alert" here — the gateway is
+    // unreachable from jsdom — so assert on the message, not the role alone.
+    const alerts = await screen.findAllByRole("alert");
+    expect(alerts.some((el) => /incorrect email or password/i.test(el.textContent ?? ""))).toBe(true);
     expect(screen.queryByLabelText(/^message$/i)).not.toBeInTheDocument();
   });
 
@@ -97,15 +98,19 @@ describe("authentication gate", () => {
     );
   });
 
-  it("offers a one-click demo sign-in", async () => {
-    vi.mocked(auth.loginAsDemo).mockResolvedValue(makeSession());
-
-    const user = userEvent.setup();
+  // Credentials are the only way in. A demo/guest shortcut that mints a session
+  // without a password would undo the rest of the auth layer, so its absence is
+  // asserted rather than left to convention.
+  it("offers no credential-free way in", async () => {
     renderWithProviders(<Home />);
+    await screen.findByRole("heading", { name: /welcome back/i });
 
-    await user.click(await screen.findByRole("button", { name: /try the demo account/i }));
-    await waitFor(() => expect(auth.loginAsDemo).toHaveBeenCalled());
-    expect(await screen.findByLabelText(/^message$/i)).toBeInTheDocument();
+    for (const label of [/demo/i, /guest/i, /admin/i, /continue without/i, /skip sign/i]) {
+      expect(screen.queryByRole("button", { name: label })).not.toBeInTheDocument();
+    }
+    // Only the two credentialed actions remain.
+    expect(screen.getByRole("button", { name: /^sign in$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create one/i })).toBeInTheDocument();
   });
 
   it("keeps the password hidden until the reveal control is used", async () => {
@@ -120,5 +125,30 @@ describe("authentication gate", () => {
 
     await user.click(screen.getByRole("button", { name: /hide password/i }));
     expect(password).toHaveAttribute("type", "password");
+  });
+});
+
+describe("backend status banner", () => {
+  // The most common local-setup failure is starting the UI without the API.
+  // Before this banner the page looked healthy and the only feedback was an
+  // error after submitting, which reads as "the buttons don't work".
+  it("warns when the gateway is unreachable", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")));
+    renderWithProviders(<Home />);
+
+    expect(await screen.findByText(/backend not reachable/i)).toBeInTheDocument();
+    expect(screen.getByText(/docker compose up/i)).toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+
+  it("stays out of the way when the gateway answers", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 200 })));
+    renderWithProviders(<Home />);
+
+    await screen.findByRole("heading", { name: /welcome back/i });
+    await waitFor(() =>
+      expect(screen.queryByText(/backend not reachable/i)).not.toBeInTheDocument()
+    );
+    vi.unstubAllGlobals();
   });
 });

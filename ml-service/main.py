@@ -90,11 +90,15 @@ LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile" if GROQ_API_KEY els
 # Two embedding backends, because the best local model is too heavy to deploy:
 #
 #   huggingface — BAAI/bge-large-en-v1.5 through sentence-transformers/torch.
-#                 1024-dim, best retrieval quality, ~1.3GB of weights and a
-#                 torch runtime. The default for local development.
+#                 1024-dim and the best retrieval quality, but ~1.3GB of weights
+#                 on top of a torch runtime. Opt in with docker-compose.full.yml.
 #   fastembed   — the same BGE family as quantized ONNX, run through
 #                 onnxruntime with no torch at all. ~130MB and a few hundred MB
-#                 of RSS, which is what makes a 512MB managed instance viable.
+#                 of RSS, which is what both `docker compose up` and the Render
+#                 blueprint use.
+#
+# This module default stays huggingface so a bare `python main.py` gets the
+# better model; compose and Render set EMBED_BACKEND=fastembed explicitly.
 EMBED_BACKEND = os.getenv("EMBED_BACKEND", "huggingface").lower()
 if EMBED_BACKEND == "fastembed":
     EMBED_MODEL_NAME = os.getenv("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
@@ -357,6 +361,37 @@ def apply_prompt(query_engine: RetrieverQueryEngine, history: list["ChatMessage"
     query_engine.update_prompts({"response_synthesizer:text_qa_template": template})
 
 
+def describe_backend_failure(exc: Exception) -> str:
+    """Turn a backend failure into something the reader can act on.
+
+    Generation errors surface in the chat bubble, and the raw driver text
+    ("failed to allocate CPU_REPACK buffer", a bare ConnectionError) reads as
+    "the app is broken" rather than naming the one thing that needs fixing.
+    These three account for essentially every local failure.
+    """
+    detail = str(exc)
+    lowered = detail.lower()
+
+    if LLM_BACKEND == "ollama":
+        if any(k in lowered for k in ("connection", "connect", "refused", "timed out", "timeout")):
+            return (
+                f"Cannot reach Ollama at {OLLAMA_BASE_URL}. Start it with `ollama serve`, "
+                f"or set GROQ_API_KEY to use a hosted model instead."
+            )
+        if "not found" in lowered or "no such model" in lowered or "pull" in lowered:
+            return f"Ollama does not have the model '{LLM_MODEL}'. Run `ollama pull {LLM_MODEL}`."
+        if any(k in lowered for k in ("memory", "allocate", "buffer", "oom")):
+            return (
+                f"Ollama could not load '{LLM_MODEL}' — not enough free memory. "
+                f"Use a smaller model (set LLM_MODEL=llama3.2:3b and run "
+                f"`ollama pull llama3.2:3b`), or set GROQ_API_KEY to offload generation."
+            )
+    elif "api" in lowered and ("key" in lowered or "auth" in lowered or "401" in lowered):
+        return "Groq rejected the API key. Check GROQ_API_KEY."
+
+    return f"The language model failed to respond: {detail}"
+
+
 def doc_count(user_id: str) -> int:
     directory = Path(DATA_DIR) / user_id
     if not directory.is_dir():
@@ -493,7 +528,11 @@ async def chat(request: QueryRequest, x_axiom_user_id: str | None = Header(defau
 
     query_engine = build_hybrid_query_engine(user_id, streaming=False)
     apply_prompt(query_engine, request.history)
-    response = query_engine.query(request.query)
+    try:
+        response = query_engine.query(request.query)
+    except Exception as exc:  # noqa: BLE001 - reported to the caller, not swallowed
+        logger.exception("Error while answering chat request")
+        raise HTTPException(status_code=502, detail=describe_backend_failure(exc)) from exc
 
     return {"response": str(response), "source_nodes": _serialize_sources(response)}
 
@@ -519,7 +558,8 @@ async def chat_stream(request: QueryRequest, x_axiom_user_id: str | None = Heade
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as exc:  # headers are already sent, so this must surface as an SSE event
             logger.exception("Error while streaming chat response")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+            message = describe_backend_failure(exc)
+            yield f"data: {json.dumps({'type': 'error', 'message': message})}\n\n"
 
     return StreamingResponse(
         event_stream(),

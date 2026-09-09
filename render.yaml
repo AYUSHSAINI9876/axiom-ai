@@ -99,5 +99,3 @@ services:
       # and so can't be listed exactly.
       - key: CORS_ALLOWED_ORIGINS
         sync: false
-      - key: DEMO_ACCOUNT_PASSWORD
-        generateValue: true

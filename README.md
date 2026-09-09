@@ -64,13 +64,35 @@ docker compose up --build
 On Windows you can instead run `./run.ps1`, which checks Docker and Ollama first and
 generates a `JWT_SECRET` into `.env` so your session survives restarts.
 
-Then open **http://localhost:3000**, and either create an account or click
-**Try the demo account**.
+Then open **http://localhost:3000** and create an account. There is no demo or guest
+shortcut — email and password is the only way in.
 
-> **First boot takes several minutes.** The ML service downloads the
-> `BAAI/bge-large-en-v1.5` embedding model (~1.3 GB). It's cached in the `hf_cache`
-> volume, so later starts are fast. The gateway and UI come up immediately and show a
-> clear status while the ML service warms up.
+> **First boot** builds the images and downloads a ~130 MB embedding model, so give it
+> a few minutes. The sign-in page tells you plainly if the API isn't up yet, and clears
+> that warning by itself once it is.
+
+### If you have limited RAM
+
+`llama3` needs roughly **4 GB of free memory** to load. If Ollama can't allocate it,
+answers fail with a message saying so. Two ways around it:
+
+```bash
+# a smaller local model
+ollama pull llama3.2:3b        # then set LLM_MODEL=llama3.2:3b in .env
+
+# or skip Ollama entirely - free key at https://console.groq.com/keys
+echo "GROQ_API_KEY=gsk_..." >> .env
+```
+
+### Better retrieval, if the machine has room
+
+The default stack embeds with quantized ONNX BGE (small, fast, no torch) — the same
+image the Render blueprint deploys. For the higher-quality 1024-dim model, at the cost
+of a ~4 GB image and 1.3 GB of weights:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.full.yml up --build
+```
 
 ### Adding documents
 
@@ -92,13 +114,15 @@ can reach it.
 | --- | --- | --- |
 | `POST` | `/auth/register` | Create an account → session |
 | `POST` | `/auth/login` | Email + password → session |
-| `POST` | `/auth/demo` | Sign in to the shared demo account |
 | `POST` | `/auth/refresh` | Exchange a refresh token for a new pair (rotating) |
 | `POST` | `/auth/logout` | Revoke a refresh token |
 | `GET` | `/auth/me` | The signed-in user |
 
 **Design decisions, and why:**
 
+- **There is no demo, guest, or admin shortcut.** Registration and login are the only
+  routes that mint a session; a credential-free entry point would undo everything
+  below it, so its absence is asserted by tests in both the gateway and the frontend.
 - **Passwords are bcrypt-hashed**, and anything over 72 bytes is rejected rather than
   silently truncated — bcrypt ignores the remainder, which would quietly weaken a long
   passphrase to its first 72 bytes.
@@ -158,7 +182,6 @@ All variables are optional; the defaults below are what `docker compose` uses.
 | `TRUSTED_PROXIES` | *(none)* | `*` to trust `X-Forwarded-For` behind a managed host's edge. |
 | `ACCESS_TOKEN_TTL_MINUTES` | `15` | Access token lifetime |
 | `REFRESH_TOKEN_TTL_DAYS` | `30` | Refresh token lifetime |
-| `DEMO_ACCOUNT_PASSWORD` | *(dev default)* | Password for the shared demo account |
 
 ### `ml-service`
 
@@ -166,11 +189,11 @@ All variables are optional; the defaults below are what `docker compose` uses.
 | --- | --- | --- |
 | `QDRANT_URL` | `http://localhost:6333` | Qdrant endpoint |
 | `QDRANT_API_KEY` | *(unset)* | Required by Qdrant Cloud |
-| `EMBED_BACKEND` | `huggingface` | `fastembed` for the ONNX/no-torch deployment path |
+| `EMBED_BACKEND` | `huggingface` | Compose and Render set `fastembed` (ONNX, no torch) |
 | `EMBED_MODEL` | `BAAI/bge-large-en-v1.5` | `BAAI/bge-small-en-v1.5` under `fastembed` |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Used when `GROQ_API_KEY` is unset |
 | `GROQ_API_KEY` | *(unset)* | If set, uses Groq-hosted Llama 3 instead of Ollama |
-| `LLM_MODEL` | `llama3` / `llama-3.3-70b-versatile` | Depends on the backend |
+| `LLM_MODEL` | `llama3` / `llama-3.3-70b-versatile` | Depends on the backend. Use `llama3.2:3b` on a small machine. |
 | `GATEWAY_SHARED_SECRET` | *(unset)* | When set, rejects any request without the matching key |
 | `DATA_DIR` | `./data/docs` | Corpus root; each user gets a subdirectory |
 | `PERSIST_DIR` | `./storage` | Docstore/index metadata (survives restarts) |
@@ -202,8 +225,8 @@ Every `/api/*` route requires `Authorization: Bearer <access token>`.
 
 ## Features
 
-- **Accounts** — register, sign in, one-click demo, rotating refresh tokens, sign-out
-  everywhere on token reuse.
+- **Accounts** — register, sign in, sign out, rotating refresh tokens, and sign-out
+  everywhere on token reuse. No demo or guest bypass.
 - **Per-user corpora** — documents, retrieval, and conversation history are scoped to
   the signed-in account.
 - **Hybrid search** — `QueryFusionRetriever` reciprocally reranks a dense vector
@@ -319,13 +342,13 @@ Render redeploys the gateway automatically. Open the Vercel URL and sign in.
 ## Testing
 
 ```bash
-# gateway — go vet + 21 tests (auth, proxy, SSE, isolation, config)
+# gateway — go vet + 22 tests (auth, proxy, SSE, isolation, config)
 cd gateway && go vet ./... && go test ./...
 
-# ml-service — 16 tests (health, upload→retrieve, streaming, per-user isolation)
+# ml-service — 20 tests (health, upload→retrieve, streaming, per-user isolation)
 cd ml-service && pip install -r requirements-dev.txt && pytest
 
-# frontend — lint + 29 tests + production build
+# frontend — lint + 34 tests + production build
 cd frontend && npm ci && npm run lint && npm run test && npm run build
 ```
 
@@ -336,7 +359,8 @@ end-to-end auth smoke test against a real Postgres on every push and PR.
 
 After `docker compose up --build`:
 
-1. `http://localhost:3000` shows the sign-in screen, not the chat UI.
+1. `http://localhost:3000` shows the sign-in screen, not the chat UI, and no demo or
+   guest button anywhere on it.
 2. Create an account — you land in the chat with a "connected" status indicator.
 3. The sidebar already lists the starter document seeded for your account.
 4. Upload a document; it appears in the list.

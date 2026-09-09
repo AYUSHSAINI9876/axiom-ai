@@ -14,7 +14,6 @@ import {
   clearSession,
   loadSession,
   login as loginRequest,
-  loginAsDemo as demoRequest,
   logout as logoutRequest,
   refreshSession,
   register as registerRequest,
@@ -28,7 +27,6 @@ interface AuthContextValue {
   isReady: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, name: string, password: string) => Promise<void>;
-  signInAsDemo: () => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -146,8 +144,6 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     [adopt]
   );
 
-  const signInAsDemo = useCallback(async () => adopt(await demoRequest()), [adopt]);
-
   const signOut = useCallback(async () => {
     const current = sessionRef.current;
     setBoth(null);
@@ -156,8 +152,8 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   }, [setBoth]);
 
   const value = useMemo(
-    () => ({ user: session?.user ?? null, isReady, signIn, signUp, signInAsDemo, signOut }),
-    [session, isReady, signIn, signUp, signInAsDemo, signOut]
+    () => ({ user: session?.user ?? null, isReady, signIn, signUp, signOut }),
+    [session, isReady, signIn, signUp, signOut]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

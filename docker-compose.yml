@@ -25,8 +25,17 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
+  # Defaults to the ONNX build: quantized BGE embeddings through onnxruntime,
+  # no torch. It is a ~1GB image that starts in under a minute and needs a few
+  # hundred MB of RAM, and it is the same image the Render blueprint deploys.
+  #
+  # The higher-quality local stack (sentence-transformers + BAAI/bge-large,
+  # ~4GB of image and 1.3GB of weights) is one file away:
+  #   docker compose -f docker-compose.yml -f docker-compose.full.yml up --build
   ml-service:
-    build: ./ml-service
+    build:
+      context: ./ml-service
+      dockerfile: Dockerfile.lite
     restart: unless-stopped
     ports:
       - "8000:8000"
@@ -35,6 +44,10 @@ services:
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - DATA_DIR=/app/data/docs
       - PERSIST_DIR=/app/storage
+      - EMBED_BACKEND=${EMBED_BACKEND:-fastembed}
+      # Which model Ollama is asked for. llama3 needs ~4GB of free RAM to load;
+      # set LLM_MODEL=llama3.2:3b in .env on a smaller machine.
+      - LLM_MODEL=${LLM_MODEL:-llama3}
       # Optional: set GROQ_API_KEY in a local .env to use hosted Llama 3
       # instead of local Ollama. Empty means "fall back to Ollama".
       - GROQ_API_KEY=${GROQ_API_KEY:-}
@@ -45,7 +58,7 @@ services:
       # Docstore/index metadata. Persisted so documents aren't re-embedded and
       # duplicated in Qdrant on every restart.
       - ml_storage:/app/storage
-      # Embedding weights (~1.3GB). Cached so a rebuild doesn't re-download them.
+      # Embedding weights. Cached so a rebuild doesn't re-download them.
       - hf_cache:/app/.cache/huggingface
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -58,8 +71,9 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
-      # Generous: the first boot downloads the embedding model before serving.
-      start_period: 600s
+      # The ONNX model is ~130MB, so first boot is quick. The full stack raises
+      # this in docker-compose.full.yml, where 1.3GB has to come down first.
+      start_period: 180s
 
   gateway:
     build: ./gateway
@@ -76,7 +90,6 @@ services:
       # ephemeral one and logs a warning, which only means sessions end when the
       # container restarts. Set JWT_SECRET in .env to keep them across restarts.
       - JWT_SECRET=${JWT_SECRET:-}
-      - DEMO_ACCOUNT_PASSWORD=${DEMO_ACCOUNT_PASSWORD:-}
     depends_on:
       postgres:
         # The gateway can't serve auth without its database, and unlike the ML
